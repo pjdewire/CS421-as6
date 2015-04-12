@@ -1,0 +1,30 @@
+Peter Dewire
+Assignment 6 Writeup
+
+<i> What I have done
+Finished makegraph.sml, except for MOVE instructions
+Working on liveness.sml
+
+
+<ii> How other groups would use my code
+Calling MakeGraph.instrs2graph(<instrs>), where <instrs> is a list of assembly
+instructions, will return a control flow graph corresponding to those
+instructions as well as a list of nodes in the graph.
+
+Calling MakeGraph.test() will print out the information associated with the
+graph and the nodes in it, based on the graph built for the program shown on
+Appel p. 212 and also described in RegAlloc/makegraph.sml
+
+
+<iii> What assumptions I have made
+No MOVE instructions
+
+
+<iv> What desireable features I would like other groups to work on
+Make <ii> very explicit in your README's. Say exactly which function to call and
+which parameters to send those functions and what those functions will return.
+Let me know if my <ii> is unclear.
+
+
+<v> Other files I have changed
+None
