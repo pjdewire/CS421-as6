@@ -1,0 +1,90 @@
+--------------------------------------------------------------------------
+Here are the final assignments about who will work on which project.
+
+1. Groups to work on the ItreeGen project:
+
+   IG0  Clark, Howard        howard.clark@yale.edu               hhc28   
+   IG1  Hansen, Luke         luke.m.hansen@yale.edu              lmh82   
+   IG2  Sankaran, Soham      soham.sankaran@yale.edu             sgs44   
+   IG3  Strohkorb, Sarah     sarah.strohkorb@yale.edu            sms323  
+   IG4  Tan, Michael         michael.tan@yale.edu                mlt34   
+   IG5  Tran, Lien           lien.tran@yale.edu                  llt23   
+   IG6  Celebi, Feridun      feridun.celebi@yale.edu             fmc27   
+   IG7  Elek, Tihomir        tihomir.elek@yale.edu               te77    
+   IG8  Pan, Eric            eric.pan@yale.edu                   ezp2    
+   IG9  Price, Sage          sage.price@yale.edu                 sep56   
+   IGX  Sinha, Aditya        aditya.sinha@yale.edu               as2633  
+   IGY  Wu, Frank            frank.j.wu@yale.edu                 fjw22
+   IGZ  Cheruiyot, Andrew    andrew.cheruiyot@yale.edu           akc39   
+
+2. Groups to work on the CodeGen project:
+
+   CG0  Liu, Mengqi          mengqi.liu@yale.edu                 ml928   
+   CG1  Mitropolsky, Daniel  daniel.mitropolsky@yale.edu         dgm46   
+   CG2  Sufi, Arsalan        arsalan.sufi@yale.edu               aas85   
+   CG3  Torres, Diego        diego.torresquintanilla@yale.edu    dat43   
+   CG4  Abbott, Kevin        kevin.abbott@yale.edu               kga22   
+   CG5  Kim, Daniel          daniel.kim@yale.edu                 drk33   
+   CG6  Li, Shantao          shantao.li@yale.edu                 sl847   
+   CG7  Liu, Jason           jason.liu@yale.edu                  jkl56
+   CG8  Geiger, Jacob        jacob.geiger@yale.edu               jsg74   
+   CG9  Chang, Richard       richard.w.chang@yale.edu            rwc39   
+   CGX  Goldstein, Samuel    samuel.goldstein@yale.edu           sjg58
+   CGY  Xia, Harvey          harvey.xia@yale.edu                 hx52
+
+3. Groups to work on the RegAlloc project:
+
+   RA0  Jin, Charles         charles.jin@yale.edu                ccj23   
+   RA1  Kim, Jason           jason.kim@yale.edu                  jyk34   
+   RA2  Lifland, Seth        seth.lifland@yale.edu               swl25   
+   RA3  Anderson, Eric       eric.t.anderson@yale.edu            eta7    
+   RA4  Anklesaria, Samuel   samuel.anklesaria@yale.edu          sna23   
+   RA5  Dewire, Peter        peter.dewire@yale.edu               pjd45   
+   RA6  Gan, Keshane         keshane.gan@yale.edu                khg22   
+   RA7  Gonzalez, Ian        ian.gonzalez@yale.edu               isg2    
+   RA8  Ho, Eric             eric.ho@yale.edu                    eh425   
+   RA9  Isenstein, Joshua    joshua.isenstein@yale.edu           jdi7    
+   RAX  Maddi, Pranav        pranav.maddi@yale.edu               pm452   
+   RAY  Nguyen, Peter        peter.nguyen@yale.edu               pn74    
+
+--------------------------------------------------------------------------
+Please post your questions, concerns, advertisements to the piazza forum.
+I expect we will have a lively discussion in the next few weeks.
+--------------------------------------------------------------------------
+
+In addition, I'll ask the CS Facility to create the following 
+user groups (on all ZOO machines): 
+
+cs421ig: ml928,dgm46,aas85,dat43,kga22,drk33,sl847,jkl56,jsg74,rwc39,sjg58,hx52,ccj23,jyk34,swl25,eta7,sna23,pjd45,khg22,isg2,eh425,jdi7,pm452,pn74
+
+cs421cg: hhc28,lmh82,sgs44,sms323,mlt34,llt23,fmc27,te77,ezp2,sep56,as2633,fjw22,akc39,ccj23,jyk34,swl25,eta7,sna23,pjd45,khg22,isg2,eh425,jdi7,pm452,pn74
+
+cs421ra: hhc28,lmh82,sgs44,sms323,mlt34,llt23,fmc27,te77,ezp2,sep56,as2633,fjw22,akc39,ml928,dgm46,aas85,dat43,kga22,drk33,sl847,jkl56,jsg74,rwc39,sjg58,hx52
+
+Each IG directory will be owned by a specific IG team member and also the 
+cs421ig group that contains members of those groups working on CG and RA
+modules.
+
+Each CG directory will be owned by a specific CG team member and also the 
+cs421cg group that contains members of those groups working on IG and RA
+modules.
+
+Each RA directory will be owned by a specific RA team member and also the 
+cs421ra group that contains members of those groups working on IG and CG
+modules.
+
+You can use the "groups" command to check what groups you are
+currently in.
+
+The /c/cs421/as/Public directory now contains 6 directories: 
+                                       6a, 6b, 6c, 6d, 6e, cur
+
+You can use "cur" as your current working directory and use 6a-e 
+as your checkpoint directories. Each of these directories contains 
+a subdirectory for each group, named with your group code:
+
+  IG0, IG1, IG2, IG3, IG4, IG5, IG6, IG7, IG8, IG9, IGX, IGY, IGZ,
+  CG0, CG1, CG2, CG3, CG4, CG5, CG6, CG7, CG8, CG9, CGX, CGY,
+  RA0, RA1, RA2, RA3, RA4, RA5, RA6, RA7, RA8, RA9, RAX, RAY
+
+--------------------------------------------------------------------------

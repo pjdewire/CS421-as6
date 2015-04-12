@@ -1,0 +1,82 @@
+From the following example, I hope to explain to you how to properly
+generate the PPC assembly code that can be correctly linked with 
+the "runtime.c" file for as6.
+
+***File "bar.s" contains a sample PPC assembly program 
+Here are some explanations on what it does:
+----------------------------------------------------------------------------
+# comments in assembly file are followed by symbol #
+#
+.csect 	.text[PR]                   # This starts a program segment;
+	.extern .printf             # Function ".printf" is externally defined;
+	.extern .g                  # Function ".g" is externally defined;
+sss:	.byte "hello "              # This defines a string constant "hello\n"
+	.byte 10, 0                 #      labelled as "sss"; 
+.toc                                # Start of "table-of-content" area;
+sss_disp:         
+	.tc sss[TC],sss             # "sss_disp" is the offset relative to the
+                                    # table-of-content register (register 2);
+                                    #
+                                    # To refer to string "sss", you can just
+                                    # say "sss_disp(2)", see below --->;
+.csect 	.text[PR]                   # Start of function "f";
+	.align 2                    # alignment;
+	.globl .f                   # Function ".f" is global;
+.f:                                 # The actual label ".f";
+	mflr 0                      # Fetch the Link Register LR to Register 0;
+	st 0,8(1)                   # Save the Reg 0 to offset 8 of SP
+	ai 9,1,-64                  # Increment the stack pointer ..., 
+	st 1,0(9)                   # and save old SP at offset 0 of new SP,
+	mr 1,9                      # and set new SP;
+	l 3,sss_disp(2)             # Load label "sss" into Reg 3;
+	bl .printf                  # Call "printf" via Branch-and-Link Instr.
+	nop                         # the instruction right after "bl" should
+                                    # be a "nop" instr. The "bl" instruction
+                                    # will set the address of "nop" into the
+                                    # Link Reg LR and then branch to "printf"
+                                    # 
+	bl .g                       # Call function "g";
+	nop                        
+	mr 0,3                      # Move the return value in Reg 3 into
+                                    # Register 0;
+	ai 9,0,3                    # Add Reg 0 and Int 3 into Reg 9;
+	mr 3,9                      # Move Reg 9 into stardard arg reg (Reg 3);
+	l 1,0(1)                    # Restore the old Stack pointer (i.e. POP);
+	l 0,8(1)                    # Load return address (old LR) into Reg 0;
+	mtlr 0                      # Move Reg 0 into the Link Reg. (LR) 
+	br                          # Return to the caller (return addr. in LR)
+---------------------------------------------------------------
+
+These assembly code in "bar.s" roughly corresponds to the following C 
+programs:
+
+---------------------------------------------------------------
+/* a possible C program mapping of the assembly file "bar.s"
+int f () {
+  printf("hello \n");
+  return (3 + (g()));
+}
+---------------------------------------------------------------
+
+***If we link "bar.s" with the following "foo.c" file, we can generate
+a PPC executable "a.out" by 
+
+        gcc foo.c bar.s
+
+***Here is the actual "foo.c" file:
+---------------------------------------------------------------
+main() {
+  printf ("%d \n",f(3));
+}
+
+int g () {
+  return 4;
+}
+---------------------------------------------------------------
+
+***Running "a.out" will print the following:
+---------------------------------------------------------------
+hello 
+7
+---------------------------------------------------------------
+

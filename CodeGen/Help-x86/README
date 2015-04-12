@@ -1,0 +1,210 @@
+
+
+
+  x86 Calling Convention and Linkage with C
+  -----------------------------------------
+  adapted by Christopher League <league@contrapunctus.net>
+  from the PowerPC example by former TAs in times past,
+  and with assistance from Antony Courtney <antony@apocalypse.org>,
+  who blazed this particular trail in '98.
+  
+
+  THE EXAMPLE
+  
+  The following example should guide you in generating x86 assembly
+  code that can be correctly linked with the runtime library
+ `runtime.c' for assignment 6.
+  
+  The file `foo.c' contains two functions, `main' and `g':
+  
+      main() {
+        printf ("%d \n",f(3));
+      }
+      
+      int g () {
+        return 4;
+      }
+
+  It also uses a function `f' which is not defined.  We will define
+  function `f' in assembly language, in the file `bar.s' (`.s' is the
+  standard extension for assembly language code on the Unix
+  platform).  
+
+  The assembly code in `bar.s' will roughly correspond to the
+  following C function definition (so you can get an idea of what 
+  this program does before we dig in):
+
+      int f (int x) {
+        printf("hello %d\n", x);
+        return (x + (g()));
+      }
+
+  We can see that the output of the program should be:
+
+      hello 3
+      7 
+
+
+  ASSEMBLY TOOLS ON LINUX
+
+  On Linux, we will use the GNU assembler (gas), which is invoked on
+  its own by `as'.  If you are working with 64-bit machines (e.g., 
+  all the ZOO machines, we will use the "-m32" option to target toward
+  32-bit machines. Normally, you do "as -m32 -o file.o file.s" to assemble
+ `file.s' into the object file `file.o', which can then be linked to
+  with other object files in the usual way (with `ld').
+
+  You may not even need to invoke `as' directly; `gcc' can call it for
+  you.  To build the example, just enter:
+
+      gcc -m32 foo.c bar.s
+
+  Gcc will recognize that `foo.c' is a C file and `bar.s' is an
+  assembler file, and do the right thing.  It will also do the linking
+  step for you, creating an executable `a.out' directly.
+
+  Gcc can also do other tricks, such as generating human-readable
+  assembly code from a C file; use the -S option.
+
+  Annoyingly, the GNU assembler uses a different format than the
+  x86 assemblers for DOS/Windows PCs, and therefore most examples you
+  find in the manuals will have to be translated.  The instructions
+  have this format:
+
+      instr  src, dest
+
+  Registers are marked with a percent sign: %eax, %ebx;  immediate
+  constants begin with a dollar sign: $15, $21.
+
+  For example, when you see the code
+
+      mov    dx, 0
+
+  in The Art of Assembly Language Programming, you will have to
+  translate this to 
+
+      mov    $0, %dx
+
+  for the GNU assembler to understand it.
+
+  You can read the manual for the GNU assembler using "info as" on the
+  Zoo (or "C-h i m a s RET" if you want to read it in Emacs).
+
+  Also, the book generally assumes you are using the Microsoft
+  Assembler and writing for 16-bit DOS modes.  Since we're running a
+  32-bit OS, you have to use the extended (32-bit) registers and
+  instructions.  E.g., "movl $0, $eax" rather than "mov $0, $ax".
+
+
+  LINUX x86 CALLING CONVENTION
+
+  The calling convention used with Linux on Intel machines is
+  documented in the Linux Assembly HOWTO [1], but here is a summary
+ (thanks to Antony):
+
+    o 32-bit args pushed down the stack in reverse syntactic order
+    o arguments live above 32-bit return address
+    o %ebp, %esi, %edi, %ebx are callee-saved, other registers 
+      are caller-saved
+    o %eax is to hold the result, or %edx:%eax for 64-bit results. 
+    
+ [1] http://www.linux-howto.com/LDP/HOWTO/Assembly-HOWTO.html
+
+  SP always points to top of stack.  That is, (pushl arg) has the
+  semantics: 
+      SP := SP - 4
+      [SP] := arg
+
+  From assembler emitted by gcc:
+      function entry prologue:
+        pushl %ebp     
+        movl  %esp, %ebp
+        [...]
+      function exit epilogue:
+        [...]
+        movl %ebp, %esp
+        popl %ebp
+
+
+  ANATOMY OF ASSEMBLY CODE
+
+  Finally, we return to the example with which we began.  I promised a
+  module `bar.s' containing the function `f', which will be linked
+  with the functions `main' and `g' in `foo.c'.
+
+  Here it is.  Comments begin with octothorps (#):
+
+    # First, we put constant data to be included in the object file. 
+    # The literal string below will be labelled `Hello'.  The .string
+    # directive null-terminates the string, and you can use standard 
+    # C escape sequences (e.g. `\n') as well.
+    Hello:
+            .string   "hello %d\n"
+
+    # Next, we start a "text" segment containing the global function
+    # `f'.  I'm not sure what all this means exactly; there are
+    # probably other legal incantations as well.  But this is what
+    # gcc produces.
+    .text
+            .align 4
+    .globl f
+            .type      f,@function
+
+    # Finally the code for the function `f':
+    #   int f(int x) {
+    f:
+        # standard function entry prologue.
+        pushl %ebp
+        movl %esp,%ebp
+
+        # Load argument x into a register.  Using %eax is not very good
+        # because %eax will be clobbered by the return value of g(),
+        # and I need the value in x to live beyond the call to g().
+        # So, I choose %ebx.  %ebx is a callee-save register, so
+        # I will push its current value onto the stack, to be 
+        # restored later.  
+        pushl %ebx
+
+        # Now, where is the argument x?  It is at offset 8 from the 
+        # frame pointer, which is %ebp.  Why offset 8?  Because offset 
+        # 0 contains the old base pointer, which we pushed above.  And
+        # offset 4 contains the return address pushed by the call
+        # instruction.  So offset 8 is the syntactically first
+        # argument (the last argument pushed by the caller).  
+        movl 8(%ebp),%ebx
+       
+        # Translation of printf("hello %d\n", x);
+        # We push the arguments in reverse order, call the function
+        # by name, and then pop off the two arguments by adding
+        # 8 to the stack pointer (we could use two consecutive popl
+        # instructions, but they would clobber some register.
+        pushl %ebx
+        pushl $Hello
+        call printf
+        addl $8,%esp
+
+        # Translation of g().  It takes no arguments, so we do not
+        # need to touch the stack
+        call g
+
+        # Translation of x + g().  g() returned a value in %eax.
+        # We want to add x to it and return the result, so it is
+        # convenient to just add x to %eax.  By the calling
+        # convention, the value of x is still in %ebx, so we can
+        # just use that.
+        addl %ebx,%eax
+
+        # Now, %eax contains our return value.. all that's left is
+        # to clean up.  x is no longer live, so we can restore the
+        # original value of %ebx, which should be on the top of 
+        # the stack.
+        popl %ebx
+
+        # Then do the standard epilogue, and return!
+        movl %ebp,%esp
+        popl %ebp
+        ret
+
+  And that's it.  You can find the C code in foo.c, and the assembly
+  code above (without comments) in bar.s.  They should link together 
+  fine with "gcc -m32 foo.c bar.s".

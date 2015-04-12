@@ -1,0 +1,53 @@
+Group is 
+
+(* -- The Library -- *)
+$/smlnj-lib.cm
+$/basis.cm
+$/ml-yacc-lib.cm
+
+(* -- The Front End -- *)
+FrontEnd/absyn.sml
+FrontEnd/errormsg.sml
+FrontEnd/table.sig
+FrontEnd/table.sml
+FrontEnd/tiger.lex
+FrontEnd/tiger.grm
+FrontEnd/symbol.sml
+FrontEnd/parse.sml
+
+(* -- The Compiler Main Module -- *)
+main.sml
+
+(* -- The Standard Register Interface -- *)
+reg-std.sig
+
+
+(* -- The Type Checker and the ItreeGen Module -- *)
+ItreeGen/types.sml
+ItreeGen/temp.sml
+ItreeGen/tree.sml
+ItreeGen/printtree.sml
+
+ItreeGen/env.sml
+ItreeGen/frame.sml
+ItreeGen/semant.sml
+ItreeGen/translate.sml
+
+
+(* -- The CodeGen Module -- *)
+CodeGen/assem.sml
+CodeGen/canon.sml
+
+CodeGen/register.sml
+CodeGen/codegen.sml
+
+
+(* -- The RegAlloc Module -- *)
+RegAlloc/graph.sig
+RegAlloc/graph.sml
+RegAlloc/dotgraph.sml
+RegAlloc/flowgraph.sml
+
+RegAlloc/makegraph.sml
+RegAlloc/liveness.sml
+RegAlloc/regalloc.sml
