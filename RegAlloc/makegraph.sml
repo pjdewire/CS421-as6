@@ -34,6 +34,7 @@ struct
   structure GT = Graph.Table
   structure F = Flow
   structure G = Graph
+  structure S = Symbol
 
   (* getNodeN returns the Nth node in nodeList *)
   fun getNodeN (node::n_tail : FG.node list, n, i) : FG.node = 
@@ -46,11 +47,36 @@ struct
   fun getNodeList (instr::xs, c) = Graph.newNode(c)::getNodeList(xs, c)
     | getNodeList ([], c) = []
 
+  (* makes a list of (label, instr_num) pairs for use in OPER jumps *)
+  fun getLabPairs (Assem.LABEL{assem=a, lab=label}::xs, instr_num) = 
+        (label, instr_num)::getLabPairs(xs, instr_num + 1)
+    | getLabPairs (instr::xs, instr_num) = getLabPairs(xs, instr_num + 1)
+    | getLabPairs ([], instr_num) = []
+
+  fun prLabList ((lab, num)::p_tail) = (print (S.name(lab) ^ " " ^ (Int.toString
+        num) ^ "\n"); prLabList(p_tail))
+    | prLabList ([]) = ()
+
+  (* makes edges for OPER instrs with jumps *)
+  fun makeEdges (curNode, nodeList, pairsList, label::lab_tail) =
+        (
+          makeEdgesHelp(curNode, nodeList, pairsList, label);
+          makeEdges(curNode, nodeList, pairsList, lab_tail)
+        )
+    | makeEdges (_, _, _, []) = ()
+
+  and makeEdgesHelp (curNode, nodeList, (l1, n1)::pl_tail, label) = (
+          if l1 = label then G.mk_edge({from=curNode, to=getNodeN(nodeList, n1,
+          0)})
+            else ();
+          makeEdgesHelp(curNode, nodeList, pl_tail, label)
+        )
+    | makeEdgesHelp (_, _, [], _) = ()
 
   (* i2g performs the work of instrs2graph *)
 
   fun i2g (Assem.OPER{assem=a, dst=defTemps, src=srcTemps, jump=NONE}::i_tail, fg
-        as F.FGRAPH{control, def, use, ismove}, nodeList, n_instr) = 
+        as F.FGRAPH{control, def, use, ismove}, nodeList, n_instr, pairList) = 
         let
           val curNode = getNodeN (nodeList, n_instr, 0)
           val upDefs = GT.enter(def, curNode, defTemps)
@@ -61,30 +87,42 @@ struct
             if i_tail = [] then () else (Graph.mk_edge({from=curNode,
               to=getNodeN (nodeList, n_instr + 1, 0)}); ());
             i2g(i_tail, F.FGRAPH{control=control, def=upDefs, use=upUses,
-              ismove=upIM}, nodeList, n_instr + 1)
+              ismove=upIM}, nodeList, n_instr + 1, pairList)
           )
         end
 
-    | i2g (Assem.OPER{assem=a, dst=dstTemps, src=srcTemps, 
-        jump=SOME(labList)}::i_tail, fg, nodeList, n_instr) = 
-        i2g(i_tail, fg, nodeList, n_instr + 1)
+    | i2g (Assem.OPER{assem=a, dst=defTemps, src=srcTemps, 
+        jump=SOME(labList)}::i_tail, fg as F.FGRAPH{control, def, use, ismove}, 
+        nodeList, n_instr, pairList) = 
+        let 
+          val curNode = getNodeN (nodeList, n_instr, 0);
+          val upDefs = GT.enter(def, curNode, defTemps);
+          val upUses = GT.enter(use, curNode, srcTemps);
+          val upIM = GT.enter(ismove, curNode, false);
+        in
+          (
+            makeEdges(curNode, nodeList, pairList, labList);
+            i2g(i_tail, fg, nodeList, n_instr + 1, pairList)
+          )
+        end
 
     (* for now, I am assuming that labels are associated with the instruction
     * that directly follows them. So we can always add "fall-through" edges
     * (except when jump is specified and does not include the succeeding instr,
     * as they will fall through to the label and then the next OPER *)
-    | i2g (Assem.LABEL{assem=a, lab=label}::i_tail, fg, nodeList, n_instr) =
+    | i2g (Assem.LABEL{assem=a, lab=label}::i_tail, fg, nodeList, n_instr,
+             pairList) =
                        (* this condition should never be satisfied *)
-        if i_tail = [] then i2g(i_tail, fg, nodeList, n_instr + 1)
+        if i_tail = [] then i2g(i_tail, fg, nodeList, n_instr + 1, pairList)
           else (G.mk_edge({from=getNodeN (nodeList, n_instr, 0),
                            to=getNodeN(nodeList, n_instr + 1, 0)}); 
-                           i2g(i_tail, fg, nodeList, n_instr + 1))
+                           i2g(i_tail, fg, nodeList, n_instr + 1, pairList))
 
     | i2g (Assem.MOVE{assem=a, dst=dstTemps, src=srcTemps}::i_tail, fg,
-        nodeList, n_instr) = 
-        i2g(i_tail, fg, nodeList, n_instr + 1)
+        nodeList, n_instr, pairList) = 
+        i2g(i_tail, fg, nodeList, n_instr + 1, pairList)
 
-    | i2g ([], fg, nodeList, n_instr) = (fg, nodeList)
+    | i2g ([], fg, nodeList, n_instr, pairList) = (fg, nodeList)
 
   fun instrs2graph (instrs : Assem.instr list) = 
     let 
@@ -100,8 +138,9 @@ struct
       val fg = Flow.FGRAPH{control=cGraph, def=defTemps, use=usedTemps, ismove=i};
       (* correct? *)
       val nodeList = getNodeList(instrs, cGraph);
+      val pairList = getLabPairs(instrs, 0);
     in
-      i2g(instrs, fg, nodeList, 0)
+      i2g(instrs, fg, nodeList, 0, pairList)
     end
 
     (*
@@ -126,42 +165,63 @@ struct
    
     *)
 
+
   (* what is the assem field supposed to be? any string?  *)
   (* the temporaries aren't already divided like this, are they? *)
   val i1 = Assem.OPER{assem="pet", dst=[1], src=[], jump=NONE};
   val l1 = Assem.LABEL{assem="l2", lab=Symbol.symbol("l1")};
   val i2 = Assem.OPER{assem="i2", dst=[2], src=[1], jump=NONE};
-  val i3 = Assem.OPER{assem="i3", dst=[3], src=[1, 2], jump=NONE};
+  val i3 = Assem.OPER{assem="i3", dst=[3], src=[3, 2], jump=NONE};
   val i4 = Assem.OPER{assem="i4", dst=[1], src=[2], jump=NONE};
   val i5 = Assem.OPER{assem="i5", dst=[], src=[1],
-    jump=SOME([Symbol.symbol("l2"), Symbol.symbol("l6")])};
+    jump=SOME([Symbol.symbol("l1"), Symbol.symbol("l6")])};
   val l2 = Assem.LABEL{assem="l6", lab=Symbol.symbol("l6")};
   val i6 = Assem.OPER{assem="i6", dst=[], src=[3], jump=NONE}
-  val instrs = [l1, l2, i1, i2, i3, i4, i5, i6];
+  val instrs = [i1, l1, i2, i3, i4, i5, l2, i6];
 
-  fun printNList (node::n_tail) = (print (G.nodename(node) ^ " poop\n"); 
+  fun printNList (node::n_tail) = (print (G.nodename(node) ^ ", "); 
         printNList(n_tail))
     | printNList ([]) = ()
 
   fun printNodeInfo (node::n_tail) = 
         (
-          print ("\n===============\ninfo for " ^ G.nodename(node) ^ ":\n");
-          print "------- succ --------\n";
+          print ("\n" ^ G.nodename(node) ^ ": ");
+          print "succ: ";
           printNList(G.succ(node));
-          print "-------- pred --------\n";
+          print " --- pred: ";
           printNList(G.pred(node));
           printNodeInfo(n_tail)
         )
     | printNodeInfo ([]) = ()
+
+  fun printTable (fgraph as F.FGRAPH{control, use, def, ismove}, nodeList) =
+        (
+          print "\n\nuse table\n";
+          pTable(use, nodeList);
+          print "\ndef table\n";
+          pTable(def, nodeList)
+        )
+        
+  and pTable(tbl, node::n_tail) = (print (G.nodename(node) ^ ": " ^
+        pList(getOpt(GT.look(tbl, node), [~1])));
+        pTable(tbl, n_tail))
+    | pTable(tbl, []) = ()
+
+  and pList(x::xs) = (Int.toString(x) ^ " " ^ pList(xs))
+    | pList([]) = "\n"
+
 
   fun test () = 
     (
       print "testing...\n"; 
       let 
         val (fgraph, nodeList) = instrs2graph(instrs);
+        val pairList = getLabPairs(instrs, 0);
       in 
         (
-         printNodeInfo (nodeList)
+         prLabList (pairList);
+         printNodeInfo (nodeList);
+         printTable(fgraph, nodeList)
         )
       end
     )
