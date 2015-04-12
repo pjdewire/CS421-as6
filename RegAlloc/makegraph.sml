@@ -128,14 +128,14 @@ struct
 
   (* what is the assem field supposed to be? any string?  *)
   (* the temporaries aren't already divided like this, are they? *)
-  val l1 = Assem.LABEL{assem="l2", lab=Symbol.symbol("l1")};
-  val l2 = Assem.LABEL{assem="l6", lab=Symbol.symbol("l6")};
   val i1 = Assem.OPER{assem="pet", dst=[1], src=[], jump=NONE};
+  val l1 = Assem.LABEL{assem="l2", lab=Symbol.symbol("l1")};
   val i2 = Assem.OPER{assem="i2", dst=[2], src=[1], jump=NONE};
   val i3 = Assem.OPER{assem="i3", dst=[3], src=[1, 2], jump=NONE};
   val i4 = Assem.OPER{assem="i4", dst=[1], src=[2], jump=NONE};
   val i5 = Assem.OPER{assem="i5", dst=[], src=[1],
     jump=SOME([Symbol.symbol("l2"), Symbol.symbol("l6")])};
+  val l2 = Assem.LABEL{assem="l6", lab=Symbol.symbol("l6")};
   val i6 = Assem.OPER{assem="i6", dst=[], src=[3], jump=NONE}
   val instrs = [l1, l2, i1, i2, i3, i4, i5, i6];
 
