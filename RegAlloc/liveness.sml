@@ -153,7 +153,7 @@ struct
         )
     | printLM ([]) = ()
 
-  and pList(x::xs) = (print "hello!"; (Int.toString(x) ^ " " ^ pList(xs)))
+  and pList(x::xs) = (Int.toString(x) ^ " " ^ pList(xs))
     | pList([]) = "\n"
 
 
