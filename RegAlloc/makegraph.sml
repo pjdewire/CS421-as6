@@ -11,6 +11,7 @@ sig
   val instrs2graph : Assem.instr list -> Flow.flowgraph * Flow.Graph.node list
   val instrs : Assem.instr list
   val test : unit -> unit (* Flow.flowgraph * Flow.Graph.node list *)
+  val getNodeN : Flow.Graph.node list * int * int -> Flow.Graph.node
 
 end
 
@@ -219,7 +220,7 @@ struct
         val pairList = getLabPairs(instrs, 0);
       in 
         (
-         prLabList (pairList);
+         (* prLabList (pairList); *)
          printNodeInfo (nodeList);
          printTable(fgraph, nodeList)
         )
