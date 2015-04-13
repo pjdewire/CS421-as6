@@ -19,7 +19,8 @@ sig
         Flow.flowgraph -> igraph * (Flow.Graph.node -> Temp.temp list)
 
   val test : unit -> unit
-
+  val subtractDef : (int * int list) * Temp.temp list Graph.Table.table *
+        Flow.Graph.node -> int * int list
   (*
    *  val show : outstream * igraph -> unit
    *)
@@ -67,6 +68,7 @@ struct
   * worried about efficiency *)
   fun constructLM (fgraph, nodeList, lastLO, lastLI) =
         let
+          val l = List.length(nodeList);
           val (newLO, newLI) = cLMhelp(fgraph, nodeList, lastLO, lastLI, 0);
         in
           if (listCompare(newLO, lastLO) andalso listCompare(newLI, lastLI))
@@ -84,10 +86,14 @@ struct
               val useList = getOpt(GT.look(use, node), []);
               val newLiveIn = union(useList, loSubDef);
               val newLiveOut = unionMany(G.succ(node), lastLI, nodeList);
+              val newLO = replaceElt(lastLO, (node_index, newLiveOut), 
+                    node_index, 0);
+              val newLI = replaceElt(lastLI, (node_index, newLiveIn), 
+                    node_index, 0);
               (* val outSubDef = newLO - def *)
               (* G.succ(node) *)
             in
-              cLMhelp (fgraph, nodeList, lastLO, lastLI, node_index + 1)
+              cLMhelp (fgraph, nodeList, newLO, newLI, node_index + 1)
             end
         (* otherwise we have iterated through all nodes *)
         else (lastLO, lastLI)
@@ -126,6 +132,11 @@ struct
   and listIndex (elt, x::xs, i) = if G.nodename(x) = G.nodename(elt) then i
        else listIndex(elt, xs, i + 1)
     | listIndex (elt, [], i) = (print "listIndex error\n"; ~1)
+
+  and replaceElt(x::xs, elt, n, i) = 
+        if i = n then elt::xs
+          else x::replaceElt(xs, elt, n, i + 1)
+    | replaceElt([], elt, n, i) = []
 
 
   (* after constructing the livenessMap, it is quite easy to
