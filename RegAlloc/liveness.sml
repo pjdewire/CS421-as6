@@ -78,9 +78,7 @@ struct
         lastLO, lastLI, node_index) =
         if node_index < List.length(nodeList) then (* length is 8 *)
             let
-              val x = print ("in cLMhelp " ^ Int.toString(node_index) ^ "\n");
-              val curNodeLO = List.nth (lastLO, node_index + 1);
-              val y = print "down here\n";
+              val curNodeLO = List.nth (lastLO, node_index);
               val node = List.nth (nodeList, node_index);
               val (nodeNum, loSubDef) = subtractDef(curNodeLO, def, node);
               val useList = getOpt(GT.look(use, node), []);
@@ -148,6 +146,16 @@ struct
       (igraph, node2temp)
     end
 
+  fun printLM ((x, l)::xs) =
+        (
+         print ("n" ^ Int.toString(x) ^ ": " ^ pList(l));
+         printLM (xs)
+        )
+    | printLM ([]) = ()
+
+  and pList(x::xs) = (print "hello!"; (Int.toString(x) ^ " " ^ pList(xs)))
+    | pList([]) = "\n"
+
 
   fun test () = 
     ( 
@@ -158,9 +166,13 @@ struct
        val blankLI = initLM(len, 0);
        val blankLO = initLM(len, 0);
        val (liveIn, liveOut) = constructLM(fgraph, nodeList, blankLO, blankLI);
-       val x = print "hello!\n";
      in 
-       print "poop!\n"
+       (
+        print "live out:\n";
+        printLM (liveOut);
+        print "live in:\n";
+        printLM (liveIn)
+       )
      end
     )
 
