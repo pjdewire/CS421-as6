@@ -19,8 +19,9 @@ sig
         Flow.flowgraph -> igraph * (Flow.Graph.node -> Temp.temp list)
 
   val test : unit -> unit
-  val subtractDef : (int * int list) * Temp.temp list Graph.Table.table *
-        Flow.Graph.node -> int * int list
+  (* val subtractDef : (int * int list) * Temp.temp list Graph.Table.table * *)
+        (* Flow.Graph.node -> int list *)
+
   (*
    *  val show : outstream * igraph -> unit
    *)
@@ -64,12 +65,34 @@ struct
         else if n = i then []
           else (i, [])::initLM(n, i + 1)
 
+
+  (* printing functions *)
+
+  fun printLM ((x, l)::xs) =
+        (
+         print ("n" ^ Int.toString(x) ^ ": " ^ pList(l));
+         printLM (xs)
+        )
+    | printLM ([]) = ()
+
+  and pTable(tbl, node::n_tail) = (print (G.nodename(node) ^ ": " ^
+        pList(getOpt(GT.look(tbl, node), [~1])));
+        pTable(tbl, n_tail))
+    | pTable(tbl, []) = ()
+
+  and pList(x::xs) = (Int.toString(x) ^ " " ^ pList(xs))
+    | pList([]) = "\n"
+
+  (* end printing functions *)
+
+  (* functions to construct liveness map *)
+
   (* For simplicity, I just return the livenessMap as a list, since we are not
   * worried about efficiency *)
   fun constructLM (fgraph, nodeList, lastLO, lastLI) =
         let
           val l = List.length(nodeList);
-          val (newLO, newLI) = cLMhelp(fgraph, nodeList, lastLO, lastLI, 0);
+          val (newLO, newLI) = cLMhelp(fgraph, nodeList, lastLO, lastLI, l - 1);
         in
           if (listCompare(newLO, lastLO) andalso listCompare(newLI, lastLI))
             then (newLO, newLI)
@@ -78,32 +101,36 @@ struct
 
   and cLMhelp (fgraph as F.FGRAPH{control, use, def, ismove}, nodeList,
         lastLO, lastLI, node_index) =
-        if node_index < List.length(nodeList) then (* length is 8 *)
+        if node_index > ~1 (* List.length(nodeList) *)then (* length is 8 *)
             let
               val curNodeLO = List.nth (lastLO, node_index);
               val node = List.nth (nodeList, node_index);
-              val (nodeNum, loSubDef) = subtractDef(curNodeLO, def, node);
-              val useList = getOpt(GT.look(use, node), []);
-              val newLiveIn = union(useList, loSubDef);
+
+              (* line 3 *)
               val newLiveOut = unionMany(G.succ(node), lastLI, nodeList);
+
+              (* line 2 *)
+              val loSubDef = subtractDef(newLiveOut, def, node);
+              val useList = getOpt(GT.look(use, node), []);
+
+              val newLiveIn = union(useList, loSubDef);
+
               val newLO = replaceElt(lastLO, (node_index, newLiveOut), 
                     node_index, 0);
               val newLI = replaceElt(lastLI, (node_index, newLiveIn), 
                     node_index, 0);
-              (* val outSubDef = newLO - def *)
-              (* G.succ(node) *)
             in
-              cLMhelp (fgraph, nodeList, newLO, newLI, node_index + 1)
+              cLMhelp (fgraph, nodeList, newLO, newLI, node_index - 1)
             end
         (* otherwise we have iterated through all nodes *)
         else (lastLO, lastLI)
 
   (* performs the (out[n] - def[n]) in the second line of the for loop *)
-  and subtractDef((nodeNum, outList), tbl, node) = 
+  and subtractDef(outList, tbl, node) = 
         let
           val defs = getOpt(GT.look(tbl, node), [])
         in
-          (nodeNum, subtractList(outList, defs))
+          subtractList(outList, defs)
         end
 
   and subtractList (x::xs, toDel) = if inList(x, toDel) 
@@ -114,11 +141,10 @@ struct
   and inList (x, y::ys) = if x = y then true else inList(x, ys)
     | inList (x, []) = false
 
-  and union (x::xs, y::ys) = if x = y 
-          then x::union(xs, ys)
-          else x::y::union(xs, ys)
+  and union (x::xs, l) = if inList(x, l)
+          then union(xs, l)
+          else x::union(xs, l)
     | union ([], l) = l
-    | union (l, []) = l
 
   and unionMany (x::xs, liveInList, nodeList) = 
         let 
@@ -138,34 +164,116 @@ struct
           else x::replaceElt(xs, elt, n, i + 1)
     | replaceElt([], elt, n, i) = []
 
+  (* end liveness construction *)
+
+  (* getTemps returns a list of temporaries defined and used in the control flow
+  * graph *)
+  (* the number defined should be the total number, right? *)
+  fun getTemps (node::n_tail, use, def) =
+      let
+        val uTemps = getOpt(GT.look(use, node), []);
+        val dTemps = getOpt(GT.look(def, node), []);
+        val tot = union(uTemps, dTemps);
+      in
+        union(tot, getTemps(n_tail, use, def))
+      end
+    | getTemps ([], use, def) = []
+
 
   (* after constructing the livenessMap, it is quite easy to
      construct the interference graph, just scan each node in
      the Flow Graph, add interference edges properly ... 
    *)
 
+  fun sortList(l) = 
+    if isSorted(l) then l
+      else sortList(sortOnce(l))
+
+  and sortOnce([]) = []
+    | sortOnce(x::[]) = x::[]
+    | sortOnce(x::xs) = if x > hd(xs) then hd(xs)::sortOnce(x::tl(xs))
+        else x::sortOnce(xs)
+
+  and isSorted ([]) = true
+    | isSorted (x::[]) = true
+    | isSorted (x::xs) = if x > hd(xs) then false else isSorted(xs)
+
+  (* getNodeList creates new blank nodes for every instr in Assem.instr list *)
+  fun getNodeList (instr::xs, c) = Graph.newNode(c)::getNodeList(xs, c)
+    | getNodeList ([], c) = []
+
+
+  fun mapTemps (temp::xs, intGraph, tn, gt) = 
+        let
+          val newNode = Graph.newNode(intGraph);
+          val tn = Temp.Table.enter(tn, temp, newNode);
+          val gt = Graph.Table.enter(gt, newNode, temp);
+        in
+          mapTemps(xs, intGraph, tn, gt)
+        end
+
+    | mapTemps ([], _, tn, gt) = (tn, gt)
+
+
+  (* add edges to interference graph *)
+  fun addEdges (node::xs, def, (x, thisliveOut)::lo_tail, tn) =
+        let
+          val thisNodeDefs = getOpt(GT.look(def, node), []);
+        in
+          (
+           aeHelp(thisNodeDefs, thisliveOut, tn);
+           addEdges (xs, def, lo_tail, tn)
+          )
+        end
+
+    | addEdges ([], def, _, tn) = ()   (* this should happen *)
+    | addEdges (_, def, [], tn) = ()   (*  at the same time  *)
+
+  and aeHelp (d::ds, liveList, tn) = aeHelp2 (d, liveList, tn)
+    | aeHelp ([], liveList, tn) = ()
+
+  and aeHelp2 (d, live::ls, tn) = 
+      let 
+        val f = getOpt(Temp.Table.look(tn, d), G.newNode(G.newGraph()));
+        val t = getOpt(Temp.Table.look(tn, live), G.newNode(G.newGraph()));
+      in
+        (
+         G.mk_edge({from=f, to=t});
+         aeHelp2(d, ls, tn)
+        )
+      end
+    | aeHelp2 (d, [], tn) = ()
+   (* end adding edges *)
+
+
   fun interferenceGraph (fgraph as F.FGRAPH{control, use, def, ismove}) =
     let
+      (* get liveness map *)
+      val nodeList = G.nodes(control);
+      val len = List.length(nodeList);
+      val blankLO = initLM(len, 0);
+      val blankLI = initLM(len, 0);
+      val (liveOut, liveIn) = constructLM(fgraph, nodeList, blankLO, blankLI);
+
+      (* get temporaries *)
+      val tempList = sortList(getTemps(nodeList, use, def));
+
+      (* create nodes, map them to temporaries, and do reverse mapping *)
       val intGraph = G.newGraph();
       val tn = Temp.Table.empty;
       val gt = GT.empty;
+      val (tn, gt) = mapTemps(tempList, intGraph, tn, gt)
+
       val m = [];
 
       val igraph = IGRAPH{graph=intGraph, tnode=tn, gtemp=gt, moves=m};
       fun node2temp (fgNode) = []
     in
+      (
+      addEdges(nodeList, def, liveOut, tn);
       (igraph, node2temp)
+      )
     end
-
-  fun printLM ((x, l)::xs) =
-        (
-         print ("n" ^ Int.toString(x) ^ ": " ^ pList(l));
-         printLM (xs)
-        )
-    | printLM ([]) = ()
-
-  and pList(x::xs) = (Int.toString(x) ^ " " ^ pList(xs))
-    | pList([]) = "\n"
 
 
   fun test () = 
@@ -173,10 +281,11 @@ struct
      print "testing...\n";
      let
        val (fgraph, nodeList) = M.instrs2graph(M.instrs);
+       val x = interferenceGraph(fgraph);
        val len = List.length(nodeList);
        val blankLI = initLM(len, 0);
        val blankLO = initLM(len, 0);
-       val (liveIn, liveOut) = constructLM(fgraph, nodeList, blankLO, blankLI);
+       val (liveOut, liveIn) = constructLM(fgraph, nodeList, blankLO, blankLI);
      in 
        (
         print "live out:\n";
