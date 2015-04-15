@@ -12,6 +12,10 @@ sig
   val instrs : Assem.instr list
   val test : unit -> unit (* Flow.flowgraph * Flow.Graph.node list *)
   val getNodeN : Flow.Graph.node list * int * int -> Flow.Graph.node
+  val gInfo : Flow.flowgraph -> 
+        Temp.temp list Graph.Table.table * Temp.temp list Graph.Table.table
+  val printTable : Flow.flowgraph * Flow.Graph.node list -> unit
+  val printNodeInfo : Flow.Graph.node list -> unit
 
 end
 
@@ -103,7 +107,8 @@ struct
         in
           (
             makeEdges(curNode, nodeList, pairList, labList);
-            i2g(i_tail, fg, nodeList, n_instr + 1, pairList)
+            i2g(i_tail, F.FGRAPH{control=control, def=upDefs, use=upUses,
+            ismove=upIM}, nodeList, n_instr + 1, pairList)
           )
         end
 
@@ -169,16 +174,16 @@ struct
 
   (* what is the assem field supposed to be? any string?  *)
   (* the temporaries aren't already divided like this, are they? *)
-  val i1 = Assem.OPER{assem="pet", dst=[1], src=[], jump=NONE};
-  val l1 = Assem.LABEL{assem="l2", lab=Symbol.symbol("l1")};
-  val i2 = Assem.OPER{assem="i2", dst=[2], src=[1], jump=NONE};
-  val i3 = Assem.OPER{assem="i3", dst=[3], src=[3, 2], jump=NONE};
-  val i4 = Assem.OPER{assem="i4", dst=[1], src=[2], jump=NONE};
-  val i5 = Assem.OPER{assem="i5", dst=[], src=[1],
+  val n0 = Assem.OPER{assem="pet", dst=[1], src=[], jump=NONE};
+  val n1 = Assem.LABEL{assem="l2", lab=Symbol.symbol("l1")};
+  val n2 = Assem.OPER{assem="i2", dst=[2], src=[1], jump=NONE};
+  val n3 = Assem.OPER{assem="i3", dst=[3], src=[3, 2], jump=NONE};
+  val n4 = Assem.OPER{assem="i4", dst=[1], src=[2], jump=NONE};
+  val n5 = Assem.OPER{assem="i5", dst=[], src=[1],
     jump=SOME([Symbol.symbol("l1"), Symbol.symbol("l6")])};
-  val l2 = Assem.LABEL{assem="l6", lab=Symbol.symbol("l6")};
-  val i6 = Assem.OPER{assem="i6", dst=[], src=[3], jump=NONE}
-  val instrs = [i1, l1, i2, i3, i4, i5, l2, i6];
+  val n6 = Assem.LABEL{assem="l6", lab=Symbol.symbol("l6")};
+  val n7 = Assem.OPER{assem="i6", dst=[], src=[3], jump=NONE}
+  val instrs = [n0, n1, n2, n3, n4, n5, n6, n7];
 
   fun printNList (node::n_tail) = (print (G.nodename(node) ^ ", "); 
         printNList(n_tail))
@@ -227,5 +232,6 @@ struct
       end
     )
    
+  fun gInfo (fg as F.FGRAPH{control, use, def, ismove}) = (use, def)
 
 end
