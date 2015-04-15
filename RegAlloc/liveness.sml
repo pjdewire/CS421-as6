@@ -266,8 +266,23 @@ struct
 
       val m = [];
 
+      fun node2temp (node : Flow.Graph.node) = 
+          let 
+            fun getNodeIndex(n: G.node, x::xs : G.node list, i) = 
+                  if G.nodename(n) = G.nodename(x) then i
+                    else getNodeIndex(n, xs, i + 1)
+              | getNodeIndex(n, [], i) = (print "error in nodeOutMap\n"; 0)
+          in
+             let
+               val index = getNodeIndex(node, nodeList, 0);
+               val (node_num, live_out) = List.nth(liveOut, index);
+             in
+               live_out
+             end
+          end
+
       val igraph = IGRAPH{graph=intGraph, tnode=tn, gtemp=gt, moves=m};
-      fun node2temp (fgNode) = []
+      (* fun node2temp (fgNode) = [] *)
     in
       (
       addEdges(nodeList, def, liveOut, tn);
@@ -276,12 +291,15 @@ struct
     end
 
 
+  (* fun getIgraph (igraph as IGRAPH{graph=ig, tnode=t, temp=g, moves=m}) = ig
+  * *)
+
   fun test () = 
     ( 
      print "testing...\n";
      let
        val (fgraph, nodeList) = M.instrs2graph(M.instrs);
-       val x = interferenceGraph(fgraph);
+       val (igraph, node2temp) = interferenceGraph(fgraph);
        val len = List.length(nodeList);
        val blankLI = initLM(len, 0);
        val blankLO = initLM(len, 0);
@@ -291,7 +309,9 @@ struct
         print "live out:\n";
         printLM (liveOut);
         print "live in:\n";
-        printLM (liveIn)
+        printLM (liveIn);
+        print "node info:\n"
+        (* M.printNodeInfo (G.nodes(igraph)) *)
        )
      end
     )

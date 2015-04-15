@@ -16,6 +16,8 @@ sig
         Temp.temp list Graph.Table.table * Temp.temp list Graph.Table.table
   val printTable : Flow.flowgraph * Flow.Graph.node list -> unit
   val printNodeInfo : Flow.Graph.node list -> unit
+  val removeDups : Graph.node list -> Graph.node list
+  val removeDupsString : string list -> string list
 
 end
 
@@ -189,13 +191,30 @@ struct
         printNList(n_tail))
     | printNList ([]) = ()
 
+  fun removeDups (x::xs : G.node list) = x::removeDups(rdHelp(x, xs))
+      | removeDups ([]) = []
+
+    and rdHelp (y, x::[]) = if G.nodename(x) = G.nodename(y) then [] else x::[]
+      | rdHelp (y, x::xs) = if G.nodename(x) = G.nodename(y) then rdHelp(y, xs) 
+                              else x::rdHelp(y, xs)
+      | rdHelp (y, []) = []
+
+  fun removeDupsString (x::xs : string list) = 
+        x::removeDupsString(rdsHelp(x, xs))
+    | removeDupsString ([]) = []
+
+  and rdsHelp (y, x::[]) = if x = y then [] else x::[]
+    | rdsHelp (y, x::xs) = if x = y then rdsHelp(y, xs) else x::rdsHelp(y, xs)
+    | rdsHelp (y, []) = []
+
+
   fun printNodeInfo (node::n_tail) = 
         (
           print ("\n" ^ G.nodename(node) ^ ": ");
-          print "succ: ";
-          printNList(G.succ(node));
-          print " --- pred: ";
-          printNList(G.pred(node));
+          print "adj: ";
+          printNList(removeDups(G.adj(node)));
+          (* print " --- pred: "; *)
+          (* printNList(G.pred(node)); *)
           printNodeInfo(n_tail)
         )
     | printNodeInfo ([]) = ()
