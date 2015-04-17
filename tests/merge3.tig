@@ -1,0 +1,77 @@
+let 
+
+ type any = {any : int}
+ var buffer := getchar()
+
+ function printint(i: int) =
+  let function f(i:int) = if i>0 
+	     then (f(i/10); print(chr(i-i/10*10+ord("0"))))
+   in if i<0 then (print("-"); f(-i))
+      else if i>0 then f(i)
+      else print("0")
+  end
+
+function readint(any: any) : int =
+ let var i := 0
+     function isdigit(s : string) : int = 
+		    ord(buffer)>=ord("0") & ord(buffer)<=ord("9")
+     function skipto() =
+       while buffer=" " | buffer="\n"
+         do buffer := getchar()
+  in skipto();
+     any.any := isdigit(buffer);
+     while isdigit(buffer)
+       do (i := i*10+ord(buffer)-ord("0"); /*print("\n"); printint(i); 
+            print(" num\n"); */ buffer := getchar());
+     /* 
+     works with parentheses around ord(buffer)-ord("0"), but not without. What
+     I though before, but not anymore:
+
+     problem seems to be that multiple operations are not able to be done in one
+     assignment statement. I.e. it can't store ord("0") in order to subtract it
+     from ord(buffer) (and add it to i*10). So i is always assigned just to
+     i*10, which is just 0
+     */
+     i
+ end
+
+ type list = {first: int, rest: list}
+
+ function readlist() : list =
+    let var any := any{any=0}
+        var i := readint(any)
+     in if any.any
+         then list{first=i,rest=readlist()}
+         else nil
+    end
+
+ function aList(x : int) : list =
+    if x = 0 then nil else list{first=x, rest=aList(x - 1)}
+
+ function merge(a: list, b: list) : list =
+   if a=nil then b
+   else if b=nil then a
+   else if a.first < b.first 
+      then list{first=a.first,rest=merge(a.rest,b)}
+      else list{first=b.first,rest=merge(a,b.rest)}
+
+
+ function printlist(l: list) =
+   if l=nil then print("\n")
+   else (printint(l.first); print(" "); printlist(l.rest))
+
+   var list1 := readlist()
+   var list2 := (buffer:=getchar(); readlist())
+   var list3 := list{first=4, rest=nil}
+   var list4 := list{first=1, rest=list3}
+   var list5 := list{first=3, rest=nil}
+   var list6 := list{first=2, rest=list5}
+
+
+  /* BODY OF MAIN PROGRAM */
+ in 
+    printlist(merge(list1,list2));
+    print("\n");
+    1
+end
+

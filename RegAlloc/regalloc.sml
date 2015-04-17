@@ -12,6 +12,11 @@ sig
 
    val test : unit -> unit
 
+   val regAlloc : Assem.instr list * (Temp.temp * Register.register)  list * 
+         R.register list -> (Assem.instr * Temp.temp list) list * 
+         Register.register Temp.Table.table
+
+
 end (* signature REG_ALLOC *)
 
 functor RegAllocGen(Register : REGISTER_STD) : REG_ALLOC =
@@ -101,7 +106,10 @@ struct
           val color = if List.length(poss_colors) = 0 then raise no_colors
                  else hd(poss_colors)
           val temp = getOpt(Graph.Table.look(gtemp, pop), ~1);
-          val new_alloc = Temp.Table.enter(alloc, temp, color);
+          val new_alloc = if getOpt(Temp.Table.look(alloc, temp), "") = "" 
+                             then Temp.Table.enter(alloc, temp, color)
+                             else alloc
+          (* val new_alloc = Temp.Table.enter(alloc, temp, color); *)
         in
           select(stack_tail, registers, new_alloc, gtemp)
         end
@@ -115,10 +123,7 @@ struct
      
    and getColors (node::ns, alloc, gt) =
         let
-          (* does this need to be accessed by node or by temporary *)
           val temp = getOpt(Graph.Table.look(gt, node), ~1);
-          (* this only works when the fail option is a string, so I'm assuming
-           * R.register is a string, and the colors are strings *)
           val color = getOpt(Temp.Table.look(alloc, temp), "");
         in
           if color = "" then getColors(ns, alloc, gt) else 
@@ -158,11 +163,11 @@ struct
 
     and paHelp(alloc, node::ns, gt) = 
          let
-           val t = valOf(Graph.Table.look(gt, node))
+           val t = getOpt(Graph.Table.look(gt, node), ~1)
           in
              (
               print ("t" ^ Int.toString(t) ^ " assigned to " ^ 
-                valOf(Temp.Table.look(alloc, t)) ^ "\n");
+                getOpt(Temp.Table.look(alloc, t), "WRONG T") ^ "\n");
               paHelp(alloc, ns, gt)
              )
           end
@@ -183,6 +188,64 @@ struct
         printAlloc(alloc, nodeList, gtemp)
       end
      )
+
+    fun prInstrs (Assem.OPER{assem=a, dst=defTemps, src=srcTemps,
+      jump=NONE}::i_tail) = 
+         (
+           print ("oper, no jumps, dest: " ^ pList(defTemps)); 
+           print ("\n      uses: " ^ pList(srcTemps) ^ "\n"); 
+           prInstrs(i_tail)
+         )
+      | prInstrs (Assem.OPER{assem=a, dst=defTemps, src=srcTemps,
+      jump=SOME(labList)}::i_tail) = 
+         (
+           print "oper with jump\n";
+           prInstrs(i_tail)
+         )
+      | prInstrs (Assem.LABEL{assem=a, lab=label}::i_tail) = 
+          (
+           print "label\n"; 
+           prInstrs(i_tail)
+          )
+      | prInstrs (Assem.MOVE{assem=a, dst=defTemps, src=srcTemps}::i_tail) = 
+          (
+           print "move\n"; 
+           prInstrs(i_tail)
+          )
+      | prInstrs ([]) = ()
+
+  and pList(x::xs) = (Int.toString(x) ^ " " ^ pList(xs))
+    | pList([]) = ""
+
+  fun pRegs((t, r)::xs) = (print(r ^ ": " ^ Int.toString(t) ^ "\n"); pRegs(xs))
+    | pRegs([]) = "\n"
+
+  fun prRegs (r::xs) = (print (r ^ "\n"); prRegs(xs))
+    | prRegs ([]) = "\n"
+
+  fun initSpecRegs ((t, r)::xs, alloc) = 
+      let
+        (* val x = print (r ^ " to " ^ Int.toString(t)); *)
+        val newAlloc = Temp.Table.enter(alloc, t, r);
+      in
+        initSpecRegs(xs, newAlloc)
+      end
+    | initSpecRegs ([], alloc) = alloc
+
+
+    fun regAlloc (instrs, specRegs, availRegs) =
+        let
+          val (fgraph, nodeList) = MakeGraph.instrs2graph(instrs);
+          val (igraph as Liveness.IGRAPH{graph, tnode, gtemp, moves}, node2temp) = Liveness.interferenceGraph(fgraph);
+          val instrs_live = Liveness.instrs_temps(instrs, nodeList, node2temp);
+
+          val initAlloc = initSpecRegs(specRegs, Temp.Table.empty);
+          val alloc = color{interference=igraph, initial=initAlloc,
+                 registers=availRegs}
+          val iNodeList = G.nodes(graph);
+        in
+          (instrs_live, alloc)
+        end
 
     (* end test/print *)
 

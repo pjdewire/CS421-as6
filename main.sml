@@ -13,17 +13,28 @@ struct
   structure C = Codegen
   structure F = C.F
 
-  fun emitproc out (F.DATA {lab, s}) = TextIO.output(out,s)
-                      (*** should really be output(out,C.string(lab,s)) ***)
+  fun emitproc out (F.DATA {lab, s}) = TextIO.output(out,C.string(lab,s))
 
     | emitproc out (F.PROC{name, body, frame}) =
         let (* val _ = print ("Emit " ^ name ^ "\n") *)
             (* val _ = Printtree.printtree(out,body); *)
 
-            val stms = Canon.linearize body
-            val stms' = Canon.traceSchedule(Canon.basicBlocks stms)
+            (* val x = print "working\n"; *)
+          val stms = Canon.linearize body
+          val stms' = Canon.traceSchedule(Canon.basicBlocks stms)
+            
+          (* val y = List.map (fn x => (Printtree.printtree(TextIO.stdOut, x)))
+          * stms' *)
 
-            val instrs = List.concat(map C.codegen stms') 
+          val instrs' = List.concat(map C.codegen stms') 
+
+          val (instrs_live, alloc) = RegAlloc.regAlloc(instrs',
+               Register.specialregs, Register.availregs)
+
+             
+          val instrs = C.procEntryExit({name=name, body=instrs_live,
+          allocation=alloc, frame=frame})
+
 
             (* 
              * Once the RegAlloc module is ready, you can get 
@@ -38,7 +49,10 @@ struct
              *     
              *)
 
-            val format0 = Assem.format (fn t => "t" ^ Temp.makestring t)
+          (* val (instrs_live, allocation) = RegAlloc.regAlloc *)
+
+            val format0 = Assem.format (fn t =>
+            (valOf(Temp.Table.look(alloc,t))))
 
          in app (fn i => TextIO.output(out,format0 i)) instrs
         end
@@ -56,5 +70,3 @@ struct
         end
 
 end (* structure Main *)
-
-

@@ -1,0 +1,7 @@
+For CodeGen:
+------------
+My static link is always at PBO.
+My local variables are at offsets LBO, LBO - 4, LBO - 8, ..., LBO - 4 * (n - 1),
+  where n is the number of local variables and LBO is the locals base offset.
+My formals are at offsets PBO + 4, ..., PBO + 4 * n, where n is the
+  number of formal parameters and PBO is the params base offset.

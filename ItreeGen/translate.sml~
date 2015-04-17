@@ -68,7 +68,7 @@ sig
     (* First exp arg is the test exp; Second exp arg is the body exp. The done
     label is also passed in. *)
 
-  val forLoop : exp * exp * exp * Temp.label * Frame.offset -> exp
+  val forLoop : exp * exp * exp * Temp.label -> exp
     (* First two exp args are the lo and hi values of the for loop variable. The
     third exp arg is the body exp.  The done label is also passed in. *)
 
@@ -83,13 +83,12 @@ sig
   val addFunctionFrag : Temp.label * level * exp -> unit
     (* Adds the function frag to the global fragments list. *)
 
-  val addTigermainFrag : exp * level -> unit
+  val addTigermainFrag : exp -> unit
 
   (* Function Calls *)
   val funcCall: Temp.label * exp list * level * level -> exp
     (* Call a function. Label of function, exp list of arguments, level of
     function, level of caller. *)
-
 end (* signature TRANSLATE *)
 
 
@@ -119,8 +118,6 @@ struct
     (* Tiger nil. *)
 
 (* --------------------------- UTILITY FUNCTIONS ---------------------------- *)
-  fun isTop(level) = (level = TOP)
-
   (* Create a Tree.SEQ of from a list of Tree.stms. *)
   fun seq([a, b]) = T.SEQ(a, b)
     | seq(a::(b::(c::l))) = T.SEQ(seq([a, b]), seq(c::l))
@@ -158,7 +155,7 @@ struct
     let
       val frame = F.newFrame(numFormals)
     in
-      (LEVEL ({frame=frame, sl_offset=R.paramBaseOffset, parent=p}, ref ()))
+      (LEVEL ({frame=frame, sl_offset=4, parent=p}, ref ()))
     end
 
   fun allocInFrame (level) = (
@@ -259,7 +256,7 @@ struct
       (* Key for array bounds check: Create an extra slot for the array size.
          The array size goes in the first slot. *)
       Ex(T.ESEQ(seq[T.MOVE(T.TEMP r, F.externalCall("initArray",
-                        [T.BINOP(T.PLUS, size, T.CONST 1), init])),
+                        [T.BINOP(T.PLUS, size, T.CONST 1), init])),                 (* was sizeofnwords in front of the binop here, but I think that was a bug. *)
                     T.MOVE(F.contentsOf(T.TEMP r), size)],
                 T.TEMP r))
     end
@@ -290,18 +287,7 @@ struct
     end
 
 (* ---------------------------- SEQUENCE I-TREES ---------------------------- *)
-  fun seqItree (trExps) = (
-    let
-      fun allButLast([]) = []
-      |   allButLast([h]) = []
-      |   allButLast(h::t) = h::allButLast(t)
-      val ablTrExps = allButLast(trExps)
-    in
-      case trExps of [] => (Nx (T.EXP (T.CONST 0))) |
-                     h::t =>
-        Ex (T.ESEQ(seq (unNxList ablTrExps), unEx (List.last trExps)))
-    end
-  )
+  fun seqItree (trExps) = Nx (seq (unNxList trExps))
 
 (* ------------------------------- ASSIGNMENT ------------------------------- *)
   fun assign(toTrans, fromTrans) =
@@ -316,19 +302,19 @@ struct
   fun nullTree () = Ex (T.CONST 0)
 
   (* Locate a simple var using static links. Returns Tree.exp. *)
-  fun generateSum(tree, c_parent, c_ref, d_ref, xOffset) =
-    case c_parent of
-      TOP => (Er.error 0 "Chased functions to TOP for simple var.";
-              T.CONST 3581) |
-      LEVEL({frame=b_frame,sl_offset=b_sl_offset,parent=b_parent}, b_ref) => (
-        if (b_ref = d_ref) then
-          atSum(tree, T.CONST xOffset)
-        else 
-          generateSum(atSum(tree, T.CONST b_sl_offset), b_parent, b_ref, d_ref,
-                      xOffset)
+  fun locateSVar(d_ref, a_frame, a_sl_offset, a_parent, a_ref) =
+    case a_parent of
+      TOP =>
+        (Er.error 0 "locateSVar: Error tracing parents of fn."; T.CONST 0) |
+      LEVEL ({frame=b_frame,sl_offset=b_sl_offset,parent=b_parent}, b_ref) => (
+        if (a_ref = d_ref) then
+          T.TEMP R.FP
+        else
+          atSum(T.CONST a_sl_offset,
+                locateSVar(d_ref,b_frame,b_sl_offset,b_parent,b_ref))
       )
 
-  fun simpleVar ((levelDefined, xOffset), levelCalled) =
+  fun simpleVar ((levelDefined, offset), levelCalled) =
     (* There are two valid cases:
        1. x is inside static scope.
           This only happens if levelDefined = levelCalled.
@@ -343,15 +329,13 @@ struct
             (Er.error 0 "Simple var called at TOP level."; Ex (T.CONST 0)) |
           LEVEL ({frame=c_frame,sl_offset=c_sl_offset,parent=c_parent},
                  c_ref) => (
-            if (c_ref = d_ref) then (
+            if (c_ref = d_ref) then
               (* Case 1: x is inside static scope *)
-              Ex (atSum(T.CONST xOffset, T.TEMP R.FP))
-            )
-            else (
+              Ex (atSum(T.CONST offset, T.TEMP R.FP))
+            else
               (* Case 2: x is not inside static scope *)
-              Ex (generateSum(atSum(T.TEMP R.FP, T.CONST c_sl_offset), c_parent,
-                              c_ref, d_ref, xOffset))
-            )
+              Ex (atSum(T.CONST offset,
+                        locateSVar(d_ref,c_frame,c_sl_offset,c_parent,c_ref)))
           )
       )
 
@@ -367,26 +351,22 @@ struct
       (* Convert from Translate.exp's to Tree.exp's. *)
       val vexp = unEx(vTransExp)
       val ssexp = unEx(ssTransExp)
-      val exit = Te.newlabel() and norm1 = Te.newlabel() and
-          norm2 = Te.newlabel() and err = Te.newlabel()
+      val exit = Te.newlabel() and norm = Te.newlabel() and err = Te.newlabel()
       val ret = Te.newtemp()
     in
       (* Create the array out of bounds string if it hasn't been created yet. *)
       if !aobStringCreated = false then (
-        aobString := strItree("Array subscript out of bounds\n");
+        aobString := strItree("Array out of bounds");
         aobStringCreated := true
       ) else ();
       (* Add wordSize * (subscript+1) to the memory address containing a[0]. *)
       Ex(T.ESEQ(seq[T.MOVE(T.TEMP ret, sum(vexp, T.CONST 4)),
-                    T.CJUMP(T.TEST(T.LT, ssexp, F.contentsOf(vexp)), norm1, err),
-                    T.LABEL(norm1),
-                    T.CJUMP(T.TEST(T.GE, ssexp, T.CONST 0), norm2, err),
-                    T.LABEL(norm2),
+                    T.CJUMP(T.TEST(T.LT, ssexp, F.contentsOf(vexp)), norm, err),
+                    T.LABEL(norm),
                     T.MOVE(T.TEMP ret, sum(vexp, sizeOfNWords(sum(ssexp, T.CONST 1)))),
                     T.JUMP(T.NAME exit, [exit]),
                     T.LABEL(err),
                     T.EXP(T.CALL(T.NAME(Te.namedlabel "print"), [unEx (!aobString)])),
-                    T.EXP(T.CALL(T.NAME(Te.namedlabel "exit"), [])),
                     T.LABEL(exit)],
                 F.contentsOf(T.TEMP ret)))
     end
@@ -473,6 +453,7 @@ struct
                     T.LABEL t, T.MOVE(T.TEMP r, thenExp),
                                T.JUMP(T.NAME join, [join]),
                     T.LABEL f, T.MOVE(T.TEMP r, elseExp),
+                               T.JUMP(T.NAME join, [join]),
                     T.LABEL join],
                 T.TEMP r))
     end
@@ -508,27 +489,28 @@ struct
               T.LABEL done])
     end
 
-  fun forLoop(loTrExp, hiTrExp, bodyTrExp, done, offset) = (
+  fun forLoop(loTrExp, hiTrExp, bodyTrExp, done) = (
     let
       val loExp = unEx(loTrExp)
       val hiExp = unEx(hiTrExp)
       val bodyExp = unEx(bodyTrExp)
     in
       let
-        (* The for loop variable is located at offset. *)
+        (* The for loop variable. *)
+        val i = Te.newtemp()
         val hi = Te.newtemp()
         (* Labels for the test, body, and increment stages. *)
         val test = Te.newlabel() and body = Te.newlabel()
                                  and inc = Te.newlabel()
       in
-        Nx (seq[T.MOVE(atSum(T.TEMP R.FP, T.CONST offset), loExp),
+        Nx (seq[T.MOVE(T.TEMP i, loExp),
                 T.MOVE(T.TEMP hi, hiExp),
-                T.CJUMP(T.TEST(T.LE, atSum(T.TEMP R.FP, T.CONST offset), T.TEMP hi), body, done),
+                T.CJUMP(T.TEST(T.LE, T.TEMP i, T.TEMP hi), body, done),
                 T.LABEL(body),
                 T.EXP(bodyExp),
-                T.CJUMP(T.TEST(T.LT, atSum(T.TEMP R.FP, T.CONST offset), T.TEMP hi), inc, done),
+                T.CJUMP(T.TEST(T.LT, T.TEMP i, T.TEMP hi), inc, done),
                 T.LABEL(inc),
-                T.MOVE(atSum(T.TEMP R.FP, T.CONST offset), T.BINOP(T.PLUS, atSum(T.TEMP R.FP, T.CONST offset), T.CONST 1)),
+                T.MOVE(T.TEMP i, T.BINOP(T.PLUS, T.TEMP i, T.CONST 1)),
                 T.JUMP(T.NAME body, [body]),
                 T.LABEL(done)])
       end
@@ -561,26 +543,24 @@ struct
       case level of
         TOP => (Er.error 0 "TOP level shouldn't have a function fragment") |
         LEVEL ({frame, sl_offset, parent}, uref) => (
-          (* Printtree.printtree(TextIO.stdOut, T.EXP exp); *)
           addFrag(F.PROC {name=label, body=T.MOVE(T.TEMP R.RV, exp), frame=frame})
         )
     end
 
-  fun addTigermainFrag(transExp, level) =
+  fun addTigermainFrag(transExp) =
     let
       val exp = unEx transExp
+      val tigerMainFrame = {numFormals=0, offlst=[], locals=ref 0,
+                            maxargs=ref 0}
     in
-      case level of TOP => (Er.error 0 "wrong level TOP") |
-        LEVEL({frame, sl_offset, parent}, uref) => (
-      (* Printtree.printtree(TextIO.stdOut, T.EXP exp); *)
-      addFrag(F.PROC {name=Te.namedlabel("tigermain"), body=T.MOVE(T.TEMP R.RV, exp), frame=frame})
-      )
+      Printtree.printtree(TextIO.stdOut, T.EXP exp);
+      addFrag(F.PROC {name=Te.namedlabel("tigermain"), body=T.MOVE(T.TEMP R.RV, exp), frame=tigerMainFrame})
     end
 
 (* ---------------------------- FUNCTION CALLS ------------------------------ *)
   (* Find the static link given the levels of the fn and calling fn. *)
-  fun findFnSlink(lf, lc) = (
-    case lf of
+  fun findFnSlink(lf, lc, cur) = (
+    case lc of
       TOP => (
         (* Library function. No static link needed. *)
         T.CONST 0
@@ -592,12 +572,10 @@ struct
             T.CONST 0
           ) |
           LEVEL ({frame=c_frame, sl_offset=c_slo, parent=c_parent}, c_ref) => (
-            if (c_ref = f_ref orelse c_parent = f_parent) then (
-              atSum(T.TEMP R.FP, T.CONST c_slo)
-            )
-            else (
-              T.TEMP R.FP
-            )
+            if (c_ref = f_ref) then
+              cur
+            else
+              atSum(cur, T.CONST f_sl_offset)
           )
       )
   )
@@ -605,7 +583,7 @@ struct
   fun funcCall(label, trexpList (* ARGS *), levelF, levelCaller) = (
     let
       val expList = unExList trexpList
-    in (
+    in
       case levelF of
         TOP => (
           (* Library function. *)
@@ -613,12 +591,12 @@ struct
         ) |
         LEVEL ({frame, sl_offset, parent}, uref) => (
           let
-            val slink = findFnSlink(levelF, levelCaller)
+            val slink = findFnSlink(levelF, levelCaller,
+                                    atSum(T.TEMP R.FP, T.CONST sl_offset))
           in
             Ex (T.CALL(T.NAME label, slink::expList))
           end
         )
-      )
     end
   )
 

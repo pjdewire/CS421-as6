@@ -1,4 +1,3 @@
-(* env.sml *)
 signature ENV =
 sig
   type access
@@ -24,9 +23,9 @@ struct
   structure S = Symbol
   structure T = Types
 
-  type access = unit   (* not used for the time being *)
-  type level = unit    (* not used for the time being *)
-  type label = unit    (* not used for the time being *)
+  type access = Translate.access
+  type level = Translate.level
+  type label = Temp.label
   type ty = T.ty
 
   datatype enventry
@@ -54,43 +53,43 @@ struct
     in
     (
       myTable := Symbol.enter(!myTable,Symbol.symbol("print"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("print")),
                                        formals=[T.STRING],
                                        result=T.UNIT});
       myTable := Symbol.enter(!myTable,Symbol.symbol("flush"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("flush")),
                                        formals=nil,
                                        result=T.UNIT});
       myTable := Symbol.enter(!myTable,Symbol.symbol("getchar"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("getch")),
                                        formals=nil,
                                        result=T.STRING});
       myTable := Symbol.enter(!myTable,Symbol.symbol("ord"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("ord")),
                                        formals=[T.STRING],
                                        result=T.INT});
       myTable := Symbol.enter(!myTable,Symbol.symbol("chr"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("chr")),
                                        formals=[T.INT],
                                        result=T.STRING});
       myTable := Symbol.enter(!myTable,Symbol.symbol("size"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("size")),
                                        formals=[T.STRING],
                                        result=T.INT});
       myTable := Symbol.enter(!myTable,Symbol.symbol("substring"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("substring")),
                                        formals=[T.STRING,T.INT,T.INT],
                                        result=T.STRING});
       myTable := Symbol.enter(!myTable,Symbol.symbol("concat"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("concat")),
                                        formals=[T.STRING,T.STRING],
                                        result=T.STRING});
       myTable := Symbol.enter(!myTable,Symbol.symbol("not"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("not")),
                                        formals=[T.INT],
                                        result=T.INT});
       myTable := Symbol.enter(!myTable,Symbol.symbol("exit"),
-                              FUNentry{level=(),label=(),
+                              FUNentry{level=(Translate.outermost),label=(Temp.namedlabel("exit")),
                                        formals=[T.INT],
                                        result=T.UNIT});
       !myTable

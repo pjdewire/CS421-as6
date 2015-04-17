@@ -1,0 +1,9 @@
+let
+    var N = 8
+    type intArray = array of int
+
+    var row := intArray [N+N-1] of 0
+
+in
+    N+N-1
+end

@@ -19,6 +19,10 @@ sig
         Flow.flowgraph -> igraph * (Flow.Graph.node -> Temp.temp list)
 
   val test : unit -> unit
+
+  val instrs_temps : Assem.instr list * Flow.Graph.node list *
+        (Flow.Graph.node -> Temp.temp list) -> (Assem.instr *
+          Temp.temp list) list
   (* val subtractDef : (int * int list) * Temp.temp list Graph.Table.table * *)
         (* Flow.Graph.node -> int list *)
 
@@ -52,7 +56,6 @@ struct
   type liveSet = unit Temp.Table.table * Temp.temp list
   type livenessMap = liveSet Flow.Graph.Table.table
 
-  (* don't think this is actually necessary, can just compare lists using = *)
   fun listCompare ((x1 : int, x2 : int list)::xs, (y1 : int, y2 : int list)::ys)
         = if (x1 = y1 andalso x2 = y2) then listCompare(xs, ys) else false
     | listCompare ([], []) = true
@@ -101,7 +104,7 @@ struct
 
   and cLMhelp (fgraph as F.FGRAPH{control, use, def, ismove}, nodeList,
         lastLO, lastLI, node_index) =
-        if node_index > ~1 (* List.length(nodeList) *)then (* length is 8 *)
+        if node_index > ~1 then
             let
               val curNodeLO = List.nth (lastLO, node_index);
               val node = List.nth (nodeList, node_index);
@@ -168,14 +171,11 @@ struct
 
   (* getTemps returns a list of temporaries defined and used in the control flow
   * graph *)
-  (* the number defined should be the total number, right? *)
   fun getTemps (node::n_tail, use, def) =
       let
-        val uTemps = getOpt(GT.look(use, node), []);
         val dTemps = getOpt(GT.look(def, node), []);
-        val tot = union(uTemps, dTemps);
       in
-        union(tot, getTemps(n_tail, use, def))
+        union(dTemps, getTemps(n_tail, use, def))
       end
     | getTemps ([], use, def) = []
 
@@ -271,7 +271,7 @@ struct
             fun getNodeIndex(n: G.node, x::xs : G.node list, i) = 
                   if G.nodename(n) = G.nodename(x) then i
                     else getNodeIndex(n, xs, i + 1)
-              | getNodeIndex(n, [], i) = (print "error in nodeOutMap\n"; 0)
+              | getNodeIndex(n, [], i) = (print "error in node2temp\n"; 0)
           in
              let
                val index = getNodeIndex(node, nodeList, 0);
@@ -290,6 +290,17 @@ struct
       )
     end
 
+  
+  fun instrs_temps (instr::i_tail, node::n_tail, node2temps) = 
+        let
+          val this_temps = node2temps(node);
+        in
+          (instr, this_temps)::instrs_temps (i_tail, n_tail, node2temps)
+        end
+    | instrs_temps ([], _, _) = []
+    | instrs_temps (_, [], _) = []
+
+       
 
   (* fun getIgraph (igraph as IGRAPH{graph=ig, tnode=t, temp=g, moves=m}) = ig
   * *)

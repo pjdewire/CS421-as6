@@ -114,7 +114,7 @@ struct
           )
         end
 
-    (* for now, I am assuming that labels are associated with the instruction
+    (* I am assuming that labels are associated with the instruction
     * that directly follows them. So we can always add "fall-through" edges
     * (except when jump is specified and does not include the succeeding instr,
     * as they will fall through to the label and then the next OPER *)
@@ -126,25 +126,33 @@ struct
                            to=getNodeN(nodeList, n_instr + 1, 0)}); 
                            i2g(i_tail, fg, nodeList, n_instr + 1, pairList))
 
-    | i2g (Assem.MOVE{assem=a, dst=dstTemps, src=srcTemps}::i_tail, fg,
-        nodeList, n_instr, pairList) = 
-        i2g(i_tail, fg, nodeList, n_instr + 1, pairList)
+    | i2g (Assem.MOVE{assem=a, dst=dstTemps, src=srcTemps}::i_tail, fg as
+        F.FGRAPH{control, def, use, ismove}, nodeList, n_instr, pairList) =
+        let
+          val curNode = getNodeN (nodeList, n_instr, 0);
+          val upDefs = GT.enter(def, curNode, dstTemps::[]);
+          val upUses = GT.enter(use, curNode, srcTemps::[]);
+          val upIM = GT.enter(ismove, curNode, true);
+        in
+          (
+            if i_tail = [] then () else (Graph.mk_edge({from=curNode,
+              to=getNodeN(nodeList, n_instr + 1, 0)}); ());
+            i2g(i_tail, F.FGRAPH{control=control, def=upDefs, use=upUses,
+              ismove=upIM}, nodeList, n_instr + 1, pairList)
+            (* i2g(i_tail, fg, nodeList, n_instr + 1, pairList) *)
+          )
+        end
 
     | i2g ([], fg, nodeList, n_instr, pairList) = (fg, nodeList)
 
   fun instrs2graph (instrs : Assem.instr list) = 
     let 
       val cGraph = Graph.newGraph();
-      (*
-      val d = Graph.Table.enter(d, [], []);
-      val u = Graph.Table.enter(u, [], []);
-      val i = Graph.Table.enter(i, [], false);
-      *)
       val defTemps = Graph.Table.empty;
       val usedTemps = Graph.Table.empty;
       val i = Graph.Table.empty;
       val fg = Flow.FGRAPH{control=cGraph, def=defTemps, use=usedTemps, ismove=i};
-      (* correct? *)
+
       val nodeList = getNodeList(instrs, cGraph);
       val pairList = getLabPairs(instrs, 0);
     in
@@ -174,8 +182,6 @@ struct
     *)
 
 
-  (* what is the assem field supposed to be? any string?  *)
-  (* the temporaries aren't already divided like this, are they? *)
   val n0 = Assem.OPER{assem="pet", dst=[1], src=[], jump=NONE};
   val n1 = Assem.LABEL{assem="l2", lab=Symbol.symbol("l1")};
   val n2 = Assem.OPER{assem="i2", dst=[2], src=[1], jump=NONE};

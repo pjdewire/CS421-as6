@@ -1,4 +1,3 @@
-(* semant.sml *)
 signature SEMANT =
 sig
   type ir_code
@@ -14,19 +13,20 @@ struct
   structure E = EnvGen(Translate)
   structure S = Symbol
   structure T = Types
+  structure Tr = Translate
   structure F = Format
   val error = ErrorMsg.error
   val breakCnt = ref [0]
   val HACKsym = S.symbol("")
   val HACK = ref ()   (* unique for keeping track of FOR loop counter types *)
-  type ir_code = unit (* not used for the time being *)
+  type ir_code = Tr.exp
 
   (********************************************
    *              Error Messages              *
    ********************************************)
 
   (* Expression errors *)
-  val msgAppExp01  = "Type mismatch in parameter "
+  val msgAppExp01  = "Type mismatch"
   val msgAppExp02  = "Function called with wrong number of parameters."
   val msgAppExp03  = "Identifier is not bound to a function.  Assuming function returns INT."
   val msgAppExp04  = "Undefined identifier in function call.  Assuming function returns INT."
@@ -53,10 +53,10 @@ struct
   val msgOpNeqExp02= "Type mismatch in inequality comparison \"<>\"."
   val msgRecordExp01= "Attempt to create an undefined record type."
   val msgRecordExp02= "Record type specifier is not defined as a record type."
-  val msgRecordExp03= "Expected binding for field `%s', found binding for `%s'."
+  val msgRecordExp03= "Record binding incorrect."
   val msgRecordExp04 = "Type of field `%s' initializer does not agree with record declaration."
   val msgRecordExpMissingField = "No binding found for field `%s'."
-  val msgRecordExpExtraField = "Extraneous binding of field `%s'"
+  val msgRecordExpExtraField = "Extraneous binding of field"
 
   val msgWhileExp01= "Test expression in WHILE statement does not evaluate to an INT."
   val msgWhileExp02= "Body expression in WHILE statement does not evaluate to UNIT."
@@ -76,6 +76,8 @@ struct
   val checkFuncs01 = "Formal parameter in function declaration is of an undeclared type."
   val checkFuncs02 = "Result type in function declaration is of an undeclared type."
   val checkFuncs03 = "Result type of function body does not match declared return type."
+  val checkFuncs04 = "Couldn't find function when trying to add function fragment."
+  val checkFuncs05 = "Function entry stored not as FUNentry."
   val getFormalList01 = "Undeclared type in formal parameter list of function declaration ("
   val getFormalList02 = ")."
   val msgAddFunc01 = "Undeclared result type in function declaration.  Assuming function returns an INT."
@@ -85,6 +87,7 @@ struct
   val msgCheckTypes02="funky error."
   val msgCheckInt  = "Type mismatch, expected an INT. Replacing with INT."
   val msgCheckUnit = "Expected type of UNIT.  Replacing with UNIT."
+  val msgFieldNum = "Couldn't find field in the fields list."
   val msgNameFollow= "Primitive (non-array/record) cycle detected in recursive type definition; Type forced to INT. ("
   val msgtransty01 = "Attempt to declare an array of an unknown type."
   val msgtransty02 = "Attempt to declare a variable of an unknown type."
@@ -229,11 +232,11 @@ struct
 
 (**
   * Go through a list of possibly mutually recursive function declarations
-  * and add E.FUNenrty's for each one.  The list addedList keeps a list of a
+  * and add E.FUNentry's for each one.  The list addedList keeps a list of a
   * identifiers that have been used in this function declaration list, and
   * checks for repeated usage.
   *)
-  fun addFuncNames(env,tenv,{name,params,result,body,pos}::decs,addedList) =
+  fun addFuncNames(env,tenv,{name,params,result,body,pos}::decs,addedList,level) =
     (
       let
         val resultTy =
@@ -247,7 +250,13 @@ struct
             )
           | NONE => T.UNIT
         )
-        val env' = S.enter(env,name,E.FUNentry{level=(),label=(),formals=getFormalList(tenv,params),result=resultTy})
+        val formalsList = getFormalList(tenv, params)
+        val numFormals = length(formalsList)
+        val newLevel = Tr.newLevel({parent=level, numFormals=numFormals})
+        val env' = S.enter(env,name,E.FUNentry{level=newLevel,
+                                               label=(Temp.newlabel()),
+                                               formals=formalsList,
+                                               result=resultTy})
         val workingList =
         (
           if nameExists(name,addedList) then
@@ -256,10 +265,10 @@ struct
             (S.name(name)::addedList)
         )
       in
-        addFuncNames(env',tenv,decs,workingList)
+        addFuncNames(env',tenv,decs,workingList,level)
       end
     )
-  |   addFuncNames(env,_,nil,_) = env
+  |   addFuncNames(env,_,nil,_,_) = env
 
 (**
   * Go through a list of possibly mutually recursive type declarations
@@ -284,7 +293,20 @@ struct
     )
   |   addTypeNames(_,tenv,nil,_) = tenv
 
-
+  (*
+   * If id is the i-th field of a record, return the integer i.
+   * st is a (S.symbol, T.ty) list containing the record fields.
+   * Num is how many fields of the record we have already processed.
+   *)
+  fun fieldNum(id, [], pos) = (
+    error pos msgFieldNum;
+    0
+  ) | fieldNum(id, (sym, ty)::l, pos) = (
+    if (id = sym) then
+      0
+    else
+      1 + fieldNum(id, l, pos)
+  )
  (*****************************************************************
   *                   TRANSLATING TYPE EXPRESSIONS                *
   *                                                               *
@@ -317,7 +339,7 @@ struct
     )
 
 (**
-  * The name checkTypes is just for symmetry with checkFuncs.  What it does is
+  * The name checkTypes is just for symmetry with checkFuncsAddFragments.  What it does is
   * to walk through the type definitions and bind the unique memory cell to
   * an actual type.  The actual type may end up being a T.NAME, but the rest
   * of the code can follow through the pointers after they are resolved.
@@ -359,105 +381,165 @@ struct
  (**************************************************************************
   *                   TRANSLATING EXPRESSIONS                              *
   *                                                                        *
-  *  transexp : (E.env * E.tenv) -> (A.exp -> {exp : ir_code, ty : T.ty})  *
+  *  transexp : (E.env * E.tenv * Tr.level * Temp.label) ->                *
+  *             (A.exp -> {exp : ir_code, ty : T.ty})                      *
   **************************************************************************)
-  fun transexp (env:E.env, tenv:E.tenv) expr =
-    let fun g (A.NilExp) = {exp=(),ty=T.NIL}
-    | g (A.IntExp _) = {exp=(),ty=T.INT}
-    | g (A.StringExp (_,_)) = {exp=(),ty=T.STRING}
-    | g (A.AppExp {func,args,pos}) =
-    {exp=(),ty=
-      case S.look(env,func) of
-          SOME(E.FUNentry{level,label,formals,result}) =>
-          (
+  (* The doneLabel argument is the done label of the nearest enclosing while
+     loop. *)
+  fun transexp (env:E.env, tenv:E.tenv, level:Tr.level, doneLabel) expr =
+    let fun g (A.NilExp) = {exp=Tr.nilTree(),ty=T.NIL}
+    | g (A.IntExp i) = {exp=Tr.integer(i),ty=T.INT}
+    | g (A.StringExp (str,pos)) = {exp=Tr.strItree(str),ty=T.STRING}
+    | g (A.AppExp {func,args,pos}) = (
+        case S.look(env,func) of
+          SOME(E.FUNentry{level=level2,label,formals,result}) => (
             let
-              fun checkArgs(A::As,f::fs,n) =
+              fun expsTys([]) = []
+              |   expsTys(h::t) = (g(h))::expsTys(t)
+              fun exps([]) = []
+              |   exps({exp, ty}::t) = exp::exps(t)
+              fun tys([]) = []
+              |   tys({exp, ty}::t) = ty::tys(t)
+              val expsTysList = expsTys(args)
+              val expsList = exps(expsTysList)
+              val tysList = tys(expsTysList)
+
+              fun checkArgs(ty::Tys,f::fs) =
               (
-                case tyCmp(tenv,#ty(g A),f,pos) of
-                  NONE => (checkArgs(As,fs,n+1); error pos (msgAppExp01^Int.toString(n)^"."))
-                | SOME(_) => checkArgs(As,fs,n+1)
+                case tyCmp(tenv,ty,f,pos) of
+                  NONE => (checkArgs(Tys,fs); error pos msgAppExp01)
+                | SOME(_) => checkArgs(Tys,fs)
               )
-              |   checkArgs(nil,nil,_) = ()
-              | checkArgs(_,_,_) = error pos msgAppExp02
+              | checkArgs(nil,nil) = ()
+              | checkArgs(_,_) = error pos msgAppExp02
             in
-              checkArgs(args,formals,1);
-              result
+              (* Update the maximum number of outgoing args of the F.frame
+                 within level. *)
+              Tr.updateMaxArgs(level, length formals);
+              checkArgs(tysList,formals);
+              {exp=Tr.funcCall(label, expsList, level2, level), ty=result}
             end
           )
-        | SOME(E.VARentry{access,ty}) => (error pos msgAppExp03; T.INT)
-        | NONE => (error pos msgAppExp04; T.INT)
-    }
+        | SOME(E.VARentry{access,ty}) => (
+            error pos msgAppExp03;
+            {exp=Tr.nullTree(), ty=T.INT}
+          )
+        | NONE => (
+            error pos msgAppExp04;
+            {exp=Tr.nullTree(), ty=T.INT}
+          )
+      )
+    | g (A.RecordExp{fields,typ,pos}) =
+        let
+          fun expsTys([]) = []
+          |   expsTys((sym, exp, pos)::t) = (g exp)::expsTys(t)
+          fun exps([]) = []
+          |   exps({exp, ty}::t) = exp::exps(t)
+          fun tys([]) = []
+          |   tys({exp, ty}::t) = ty::tys(t)
+          val expsTysList = expsTys(fields)
+          val expsList = exps(expsTysList)
+          val tysList = tys(expsTysList)
 
-    | g (A.RecordExp{fields,typ,pos}) = let
-          fun chkField (symbol,exp,pos) = (symbol, #ty(g exp))
-
-          fun cmpField ([], []) = ()
-            | cmpField ((fieldSym,_)::fs, []) =
+          fun cmpField ([], [], _) = ()
+            | cmpField ((fieldSym,_)::fs, [], _) =
                 (error pos (F.format msgRecordExpMissingField
                                      [F.STR (S.name fieldSym)]);
-                 cmpField (fs, []))
-            | cmpField ([], (sym,exp,pos)::es) =
-                (error pos (F.format msgRecordExpExtraField
-                                     [F.STR (S.name sym)]);
-                 cmpField ([], es))
-            | cmpField ((fieldSym,fieldTy)::fs, (sym,exp,pos)::es) =
-              let val {ty,...} = g exp
-              in
-                  if fieldSym <> sym
-                  then error pos (F.format msgRecordExp03
-                                           [F.STR (S.name fieldSym),
-                                            F.STR (S.name sym)])
-                  else if isSome(tyCmp(tenv,fieldTy,ty,pos))
-                       then ()
-                       else error pos (F.format msgRecordExp04
-                                                [F.STR (S.name fieldSym)]);
-                  cmpField (fs,es)
-              end
+                 cmpField (fs, [], []))
+            | cmpField ([], (sym,exp,pos)::es, _) =
+                (error pos msgRecordExpExtraField;
+                 cmpField ([], es, []))
+            | cmpField ((fieldSym,fieldTy)::fs, (sym,exp,pos)::es, tysList) = (
+                case tysList of
+                  [] => (error pos "record typechecker error") |
+                  ty::t => (
+                    if fieldSym <> sym
+                    then error pos msgRecordExp03
+                    else if isSome(tyCmp(tenv,fieldTy,ty,pos))
+                      then ()
+                      else error pos (F.format msgRecordExp04
+                                      [F.STR (S.name fieldSym)]);
+                    cmpField (fs,es, t)
+                  )
+              )
 
           val ty =
               (case S.look (tenv, typ) of
                    SOME t => nameFollow(tenv, t, pos)
                  | NONE => NONE)
-      in
+        in
           case ty of
             SOME(t as T.RECORD(symTyList,uniq)) =>
-              (cmpField (symTyList, fields);
-               {exp=(), ty=t})
+              (cmpField (symTyList, fields, tysList);
+               {exp=Tr.recordItree(expsList), ty=t})
           | x =>
               (error pos (if isSome x
                           then msgRecordExp02
                           else msgRecordExp01);
-               {exp=(), ty=T.RECORD(map chkField fields, ref())}
+               {exp=Tr.nullTree(), ty=T.INT}
                )
         end
-    | g (A.SeqExp exprs) = let
-          val lastTy = ref T.UNIT;
-          fun checkSeq(nil) = !lastTy
-          | checkSeq((exp,_)::exps) = (lastTy:= #ty(g exp);checkSeq(exps);!lastTy)
-         in
-          {exp=(),ty=checkSeq(exprs)}
-         end
+    | g (A.SeqExp exprs) =
+        let
+          fun getExps([]) = []
+          |   getExps((exp, pos)::t) = exp::getExps(t)
+          val expsOnly = getExps(exprs)
+          fun expsTys([]) = []
+          |   expsTys(h::t) = (g(h))::expsTys(t)
+          fun exps([]) = []
+          |   exps({exp, ty}::t) = exp::exps(t)
+          fun tys([]) = []
+          |   tys({exp, ty}::t) = ty::tys(t)
+          val expsTysList = expsTys(expsOnly)
+          val expsList = exps(expsTysList)
+          val tysList = tys(expsTysList)
+        in
+          {exp=Tr.seqItree(expsList),ty= (
+            case tysList of [] => T.UNIT |
+            h::t => List.last(tysList)
+          )}
+        end
     | g (A.IfExp {test,then',else'=NONE,pos}) =     (* IF..THEN *)
     (
-      checkInt(g test,pos,msgIfExp01);
-      checkUnit(g then',pos,msgIfExp02);
-      {exp=(),ty=T.UNIT}
+      let
+        val {exp=testExp, ty=testTy} = g(test)
+        val {exp=thenExp, ty=thenTy} = g(then')
+      in
+        checkInt({exp=testExp, ty=testTy}, pos, msgIfExp01);
+        checkUnit({exp=thenExp, ty=thenTy}, pos, msgIfExp02);
+        {exp=Tr.ifThen(testExp, thenExp),ty=T.UNIT}
+      end
     )
     | g (A.IfExp {test,then',else'=SOME(elseexp),pos}) =    (* IF..THEN..ELSE *)
     (
-      checkInt(g test,pos,msgIfExp01);
-      case expCmp(then',elseexp,pos) of
-        SOME(t) => {exp=(),ty=t}
-      | NONE => (error pos msgIfExp03; {exp=(),ty=T.INT})
+      let
+        val {exp=testExp, ty=testTy} = g(test)
+        val {exp=thenExp, ty=thenTy} = g(then')
+        val {exp=elseExp, ty=elseTy} = g(elseexp)
+      in
+        checkInt({exp=testExp, ty=testTy},pos,msgIfExp01);
+        case tyCmp(tenv,thenTy,elseTy,pos) of
+          SOME(t) => {exp=Tr.ifThenElse(testExp, thenExp, elseExp),ty=t}
+        | NONE => (error pos msgIfExp03; {exp=Tr.nullTree(),ty=T.INT})
+      end
     )
 
     | g (A.WhileExp {test,body,pos}) =
     (
-      checkInt(g test,pos,msgWhileExp01);
-      incBreakCnt();
-      checkUnit(g body,pos,msgWhileExp02);
-      decBreakCnt();
-      {exp=(),ty=T.UNIT}
+      let
+        val newDoneLabel = Temp.newlabel()
+        val {exp=testExp, ty=testTy} = transexp (env, tenv, level, doneLabel) test
+      in
+        checkInt({exp=testExp, ty=testTy}, pos, msgWhileExp01);
+        incBreakCnt();
+          let
+            val {exp=bodyExp, ty=bodyTy} = transexp (env, tenv, level, newDoneLabel) body
+          in
+            checkUnit({exp=bodyExp, ty=bodyTy}, pos, msgWhileExp02);
+            decBreakCnt();
+            {exp=Tr.whileLoop(testExp, bodyExp, newDoneLabel), ty=T.UNIT}
+          end
+      end
     )
 
 (* MEGA HACK *)
@@ -465,26 +547,37 @@ struct
     | g (A.ForExp {var,lo,hi,body,pos}) =
     (
       let
-        val env' = S.enter(env,#name(var),E.VARentry{access=(),ty=T.RECORD([(HACKsym,T.INT)],HACK)})
+        val (lev, offset) = Tr.allocInFrame(level)
+        val env' = S.enter(env,#name(var),E.VARentry{access=(lev, offset),
+                                                     ty=T.RECORD([(HACKsym,T.INT)],HACK)})
+        val newDoneLabel = Temp.newlabel()
+
+        val {exp=loExp, ty=loTy} = g lo
+        val {exp=hiExp, ty=hiTy} = g hi
       in
-        checkInt(g lo,pos,msgForExp01);
-        checkInt(g hi,pos,msgForExp02);
+        checkInt({exp=loExp, ty=loTy},pos,msgForExp01);
+        checkInt({exp=hiExp, ty=hiTy},pos,msgForExp02);
         incBreakCnt();
-        checkUnit(transexp(env',tenv)body,pos,msgForExp03);
-        decBreakCnt();
-        {exp=(),ty=T.UNIT}
+        let
+          val {exp=bodyExp, ty=bodyTy} = transexp (env', tenv, level, newDoneLabel) body
+        in
+          checkUnit({exp=bodyExp, ty=bodyTy},pos,msgForExp03);
+          decBreakCnt();
+          {exp=Tr.forLoop(loExp, hiExp, bodyExp, newDoneLabel, offset),ty=T.UNIT}
+        end
       end
     )
     | g (A.BreakExp(pos)) =
       if (hd(!breakCnt)=0)
-      then (error pos msgBreakExp; {exp=(),ty=T.UNIT})
-      else {exp=(),ty=T.UNIT}
+      then (error pos msgBreakExp; {exp=Tr.nullTree(),ty=T.UNIT})
+      else {exp=Tr.break(doneLabel),ty=T.UNIT}
 
     | g (A.LetExp{decs,body,pos}) =
       let
-        val (env',tenv') = transdecs(env,tenv,decs)
+        val (env',tenv', transExpList) = transdecs(env,tenv,decs,level, doneLabel)
+        val {exp, ty} = transexp(env', tenv', level, doneLabel) body
       in
-        transexp(env',tenv')body
+        {exp=Tr.seqItree(transExpList @ [exp]), ty=ty}
       end
 
     | g (A.ArrayExp{typ,size,init,pos}) =   (* need to check size is int, and typeof(init) = typ *)
@@ -501,14 +594,15 @@ struct
         case tenvEnt of
           SOME(T.ARRAY(ty,u)) =>
             let
-              val initTy = (g init)
+              val {exp=initExp, ty=initTy} = g(init)
+              val {exp=sizeExp, ty=sizeTy} = g(size)
             in
-              case tyCmp(tenv,ty,#ty(initTy),pos) of
-                SOME(_) => {exp=(),ty=T.ARRAY(#ty(initTy),u)}
-              | NONE => (error pos msgArrayExp02; {exp=(),ty=T.ARRAY(T.INT,ref ())})
+              case tyCmp(tenv,ty,initTy,pos) of
+                SOME(_) => {exp=Tr.arrayItree(sizeExp, initExp),ty=T.ARRAY(initTy,u)}
+              | NONE => (error pos msgArrayExp02; {exp=Tr.nullTree(),ty=T.ARRAY(T.INT,ref ())})
             end
-        | SOME(t) => (error pos msgArrayExp03; {exp=(),ty=T.ARRAY(T.INT,ref())})
-        | NONE => (error pos msgArrayExp04; {exp=(),ty=T.ARRAY(T.INT,ref())})
+        | SOME(t) => (error pos msgArrayExp03; {exp=Tr.nullTree(),ty=T.ARRAY(T.INT,ref())})
+        | NONE => (error pos msgArrayExp04; {exp=Tr.nullTree(),ty=T.ARRAY(T.INT,ref())})
       end
     )
 
@@ -516,100 +610,128 @@ struct
     | g (A.OpExp {left,oper=A.NeqOp,right,pos}) =
     (
       let
-        val t1 = #ty(g left)
-        val t2 = #ty(g right)
+        val {exp=leftExp, ty=leftTy} = g(left)
+        val {exp=rightExp, ty=rightTy} = g(right)
       in
-        case (t1,t2) of
-          (T.NIL,T.NIL) => error pos msgOpNeqExp01
+        case (leftTy, rightTy) of
+          (T.NIL, T.NIL) => error pos msgOpNeqExp01
         | (_,_) => ();
-        case expCmp(left,right,pos) of
-          SOME(t) => {exp=(),ty=T.INT}
-        | NONE => (error pos msgOpNeqExp02; {exp=(),ty=T.INT})
+        case tyCmp(tenv,leftTy, rightTy,pos) of
+          SOME(T.STRING) => {exp=Tr.strRelop(A.NeqOp, leftExp, rightExp),ty=T.INT}
+        | SOME(_) => {exp=Tr.iarRelop(A.NeqOp, leftExp, rightExp), ty=T.INT}
+        | NONE => (error pos msgOpNeqExp02; {exp=Tr.nullTree(),ty=T.INT})
       end
     )
       | g (A.OpExp {left,oper=A.EqOp,right,pos}) =
     (
       let
-        val t1 = #ty(g left)
-        val t2 = #ty(g right)
+        val {exp=leftExp, ty=leftTy} = g(left)
+        val {exp=rightExp, ty=rightTy} = g(right)
       in
-        case (t1,t2) of
+        case (leftTy, rightTy) of
           (T.NIL,T.NIL) => error pos msgOpEqExp01
         | (_,_) => ();
-        case expCmp(left,right,pos) of
-          SOME(t) => {exp=(),ty=T.INT}
-        | NONE => (error pos msgOpEqExp02; {exp=(),ty=T.INT})
+        case tyCmp(tenv,leftTy, rightTy,pos) of
+          SOME(T.STRING) => {exp=Tr.strRelop(A.EqOp, leftExp, rightExp), ty=T.INT}
+        | SOME(t) => {exp=Tr.iarRelop(A.EqOp, leftExp, rightExp),ty=T.INT}
+        | NONE => (error pos msgOpEqExp02; {exp=Tr.nullTree(),ty=T.INT})
       end
     )
 (* Order comparison operators <, >, <=, <= apply to INTs and STRINGs only *)
     | g (A.OpExp {left,oper=A.GeOp,right,pos}) =
     (
-      case expCmp(left,right,pos) of
-        SOME(t) =>
-        (
-          case t of
-            T.INT => {exp=(),ty=T.INT}
-          | T.STRING => {exp=(),ty=T.INT}
-          | _ => (error pos (msgCmpExp01^"\">=\"."); {exp=(),ty=T.INT})
-        )
-      | NONE => (error pos (msgCmpExp02^"\">=\"."); {exp=(),ty=T.INT})
+      let
+        val {exp=leftExp, ty=leftTy} = g(left)
+        val {exp=rightExp, ty=rightTy} = g(right)
+      in
+        case tyCmp(tenv,leftTy,rightTy,pos) of
+          SOME(t) => (
+            case t of
+              T.INT => {exp=Tr.iarRelop(A.GeOp, leftExp, rightExp),ty=T.INT}
+            | T.STRING => {exp=Tr.strRelop(A.GeOp, leftExp, rightExp),ty=T.INT}
+            | _ => (error pos (msgCmpExp01^"\">=\"."); {exp=Tr.nullTree(),ty=T.INT})
+          )
+
+        | NONE => (error pos (msgCmpExp02^"\">=\"."); {exp=Tr.nullTree(),ty=T.INT})
+      end
     )
     | g (A.OpExp {left,oper=A.GtOp,right,pos}) =
     (
-      case expCmp(left,right,pos) of
-        SOME(t) =>
-        (
-          case t of
-            T.INT => {exp=(),ty=T.INT}
-          | T.STRING => {exp=(),ty=T.INT}
-          | _ => (error pos (msgCmpExp01^"\">\"."); {exp=(),ty=T.INT})
-        )
-      | NONE => (error pos (msgCmpExp02^"\">\"."); {exp=(),ty=T.INT})
+      let
+        val {exp=leftExp, ty=leftTy} = g(left)
+        val {exp=rightExp, ty=rightTy} = g(right)
+      in
+        case tyCmp(tenv, leftTy,rightTy,pos) of
+          SOME(t) =>
+          (
+            case t of
+              T.INT => {exp=Tr.iarRelop(A.GtOp, leftExp, rightExp),ty=T.INT}
+            | T.STRING => {exp=Tr.strRelop(A.GtOp, leftExp, rightExp),ty=T.INT}
+            | _ => (error pos (msgCmpExp01^"\">\"."); {exp=Tr.nullTree(),ty=T.INT})
+          )
+        | NONE => (error pos (msgCmpExp02^"\">\"."); {exp=Tr.nullTree(),ty=T.INT})
+      end
     )
     | g (A.OpExp {left,oper=A.LeOp,right,pos}) =
     (
-      case expCmp(left,right,pos) of
-        SOME(t) =>
-        (
-          case t of
-            T.INT => {exp=(),ty=T.INT}
-          | T.STRING => {exp=(),ty=T.INT}
-          | _ => (error pos (msgCmpExp01^"\"<=\"."); {exp=(),ty=T.INT})
-        )
-      | NONE => (error pos (msgCmpExp02^"\"<=\"."); {exp=(),ty=T.INT})
+      let
+        val {exp=leftExp, ty=leftTy} = g(left)
+        val {exp=rightExp, ty=rightTy} = g(right)
+      in
+        case tyCmp(tenv,leftTy,rightTy,pos) of
+          SOME(t) =>
+          (
+            case t of
+              T.INT => {exp=Tr.iarRelop(A.LeOp, leftExp, rightExp),ty=T.INT}
+            | T.STRING => {exp=Tr.strRelop(A.LeOp, leftExp, rightExp),ty=T.INT}
+            | _ => (error pos (msgCmpExp01^"\"<=\"."); {exp=Tr.nullTree(),ty=T.INT})
+          )
+        | NONE => (error pos (msgCmpExp02^"\"<=\"."); {exp=Tr.nullTree(),ty=T.INT})
+      end
     )
     | g (A.OpExp {left,oper=A.LtOp,right,pos}) =
     (
-      case expCmp(left,right,pos) of
-        SOME(t) =>
-        (
-          case t of
-            T.INT => {exp=(),ty=T.INT}
-          | T.STRING => {exp=(),ty=T.INT}
-          | _ => (error pos (msgCmpExp01^"\"<\"."); {exp=(),ty=T.INT})
-        )
-      | NONE => (error pos (msgCmpExp02^"\"<\"."); {exp=(),ty=T.INT})
+      let
+        val {exp=leftExp, ty=leftTy} = g(left)
+        val {exp=rightExp, ty=rightTy} = g(right)
+      in
+        case tyCmp(tenv,leftTy,rightTy,pos) of
+          SOME(t) =>
+          (
+            case t of
+              T.INT => {exp=Tr.iarRelop(A.LtOp, leftExp, rightExp),ty=T.INT}
+            | T.STRING => {exp=Tr.strRelop(A.LtOp, leftExp, rightExp),ty=T.INT}
+            | _ => (error pos (msgCmpExp01^"\"<\"."); {exp=Tr.nullTree(),ty=T.INT})
+          )
+          | NONE => (error pos (msgCmpExp02^"\"<\"."); {exp=Tr.nullTree(),ty=T.INT})
+      end
     )
 (* ADD,SUB,TIMES,DIVIDE apply only to INTs *)
-    | g (A.OpExp {left,oper,right,pos}) =
-      (
-        checkInt (g left, pos, msgArithExp01);
-        checkInt (g right, pos, msgArithExp02);
-        {exp=(), ty=T.INT}
-    )
+    | g (A.OpExp {left,oper,right,pos}) = (
+        let
+          val {exp=leftExp, ty=leftTy} = g(left)
+          val {exp=rightExp, ty=rightTy} = g(right)
+        in
+          checkInt ({exp=leftExp, ty=leftTy}, pos, msgArithExp01);
+          checkInt ({exp=rightExp, ty=rightTy}, pos, msgArithExp02);
+          {exp=Tr.binop(oper, leftExp, rightExp), ty=T.INT}
+        end
+      )
     | g (A.VarExp var) = h(var)
     | g (A.AssignExp {var,exp,pos}) =
     (
       let
-        val t1 = #ty(h var)
-        val t2 = #ty(g exp)
+        val {exp=assignTo, ty=varTy} = h var
+        val {exp=assignFrom, ty=expTy} = g exp
       in
-        case t1 of
+        case varTy of
           T.RECORD(s,u) => if u=HACK then (error pos msgAssignExp01) else ()
         | _ => ();
-        case tyCmp(tenv,t1,t2,pos) of
-          SOME(_) => {exp=(),ty=T.UNIT}
-        | NONE => (error pos msgAssignExp02; {exp=(),ty=T.UNIT})
+        case tyCmp(tenv, varTy, expTy,pos) of
+          SOME(_) => (
+            {exp=Tr.assign(assignTo, assignFrom),ty=T.UNIT}
+          )
+        | NONE => (error pos msgAssignExp02; {exp=Tr.nullTree(),ty=T.UNIT})
       end
     )
 
@@ -625,57 +747,47 @@ struct
           SOME(E.VARentry{access,ty}) =>
           (
             case nameFollow(tenv,ty,pos) of
-              SOME(t) => {exp=(),ty=t}
-            | NONE => (error pos msgH0x; {exp=(),ty=T.INT})
+              SOME(t) => {exp=Tr.simpleVar(access, level),ty=t}
+            | NONE => (error pos msgH0x; {exp=Tr.nullTree(),ty=T.INT})
           )
-        | SOME(E.FUNentry{level,label,formals,result}) => (error pos (msgH00^S.name(id)^")."); {exp=(),ty=T.INT})
-        | NONE => (error pos (msgH01^S.name(id)^msgH01b); {exp=(),ty=T.INT})
+        | SOME(E.FUNentry{level,label,formals,result}) => (error pos (msgH00^S.name(id)^")."); {exp=Tr.nullTree(),ty=T.INT})
+        | NONE => (error pos (msgH01^S.name(id)^msgH01b); {exp=Tr.nullTree(),ty=T.INT})
       end
     )
     | h (A.FieldVar (v,id,pos)) =
     (
       let
-        val leftPiece = nameFollow(tenv,#ty(h v),pos)
+        val {exp=vexp, ty=vty} = h(v)
+        val leftPiece = nameFollow(tenv,vty,pos)
       in
         case leftPiece of
+          (* st is a (Symbol.Symbol * Types.ty) list. *)
           SOME(T.RECORD(st,_)) =>
           (
             case isField(st,id) of
-              SOME(t) => {exp=(),ty=t}
-            | NONE => (error pos (msgH02^S.name(id)^")."); {exp=(),ty=T.INT})
+              SOME(t) => {exp=Tr.recordField(vexp, fieldNum(id, st, pos)),ty=t}
+            | NONE => (error pos (msgH02^S.name(id)^")."); {exp=Tr.nullTree(),ty=T.INT})
           )
-        | _ => (error pos msgH03; {exp=(),ty=T.INT})
+        | _ => (error pos msgH03; {exp=Tr.nullTree(),ty=T.INT})
       end
     )
     | h (A.SubscriptVar (v,exp,pos)) =
-    (
+    ( 
       let
-        val leftPiece = nameFollow(tenv,#ty(h v),pos)
+        val {exp=vexp, ty=vty} = h(v)
+        val {exp=ssexp, ty=ssty} = g(exp)
+        val leftPiece = nameFollow(tenv,vty,pos)
       in
       (
-          checkInt (g exp, pos, msgH04);
+        checkInt ({exp=ssexp, ty=ssty}, pos, msgH04);
         case leftPiece of
-          SOME(T.ARRAY(t,_)) => {exp=(),ty=t}
-        | _ => (error pos msgH05; {exp=(),ty=T.INT})
+          SOME(T.ARRAY(t,_)) => {exp=Tr.arrayElt(vexp, ssexp),ty=t}
+        | _ => (error pos msgH05; {exp=Tr.nullTree(),ty=T.INT})
       )
       end
     )
-
-(**
-  * Compare two expressions for type equality, and return the type (as an option).
-  * Return NONE if types are not equal.  This is mutually recursive so I don't have
-  * to bother with passing env and tenv back and forth.
-  *)
-  and expCmp(exp1,exp2,pos) =
-    let
-      val t1 = g exp1
-      val t2 = g exp2
-    in
-      tyCmp(tenv,#ty(t1),#ty(t2),pos)
-    end
-     in g expr
-
-
+  in
+    g expr
   end
  (** END of transexp **)
 
@@ -684,12 +796,14 @@ struct
   * appropriately `prepped' (see addFuncNames), adds the params to the
   * environment and type checks the function bodies.
   *)
-  and checkFuncs(env,tenv,({name,params,result,body,pos}:A.fundec)::decs) =
+  and checkFuncsAddFragments(env,tenv,({name,params,result,body,pos}:A.fundec)::decs,level, doneLabel) =
+    (* I-tree code comment: This function will also signal what the bodies are
+       to Translate, so that it can generate function fragments. *)
     let
       val env' =
       (
         let
-          fun addParams(penv,{var,typ,pos}::params) =
+          fun addParams(penv,{var,typ,pos}::params, lengthParams) =
             let
               val t =
               (
@@ -697,13 +811,21 @@ struct
                   NONE => (error pos checkFuncs01; T.UNIT)
                 | SOME(ty) => ty
               )
-              val penv' = S.enter(penv,#name(var:A.vardec),E.VARentry{access=(),ty=t})
+              val penv' = (
+                case S.look(env, name) of
+                  NONE => (error pos checkFuncs04; env) |
+                  SOME (E.FUNentry{level=newLevel, label, formals, result}) => (
+                    S.enter(penv,#name(var:A.vardec),
+                      E.VARentry{access=(newLevel, Tr.offsetOfNthParam(lengthParams - length(params))),ty=t})
+                  ) |
+                  SOME(_) => (error pos checkFuncs05; env)
+              )
             in
-              addParams(penv',params)
+              addParams(penv', params, lengthParams)
             end
-          | addParams(penv,nil) = penv
+          | addParams(penv,nil, _) = penv
         in
-          addParams(env,params)
+          addParams(env,params, length params)
         end
       )
       val resultTy =
@@ -717,23 +839,38 @@ struct
             | SOME(t) => t
           )
       )
-    in
-      case tyCmp(tenv,#ty(transexp(env',tenv)body),resultTy,pos) of
-        NONE => error pos checkFuncs03
-      | SOME(t) => ();
-      checkFuncs(env,tenv,decs)
+    in      
+      (* Add the function fragment. *)
+      case S.look(env', name) of
+        NONE => (error pos checkFuncs04)
+      | SOME (E.FUNentry{level, label, formals, result}) => (
+          let
+            val bodyEval = transexp (env', tenv, level, doneLabel) body
+          in
+            case tyCmp(tenv,#ty bodyEval,resultTy,pos) of
+              NONE => error pos checkFuncs03
+            | SOME(t) => ();
+            Tr.addFunctionFrag(label, level, #exp bodyEval)
+          end
+        )
+      | SOME (_) => (error pos checkFuncs05);
+
+      checkFuncsAddFragments(env,tenv,decs,level, doneLabel)
     end
-  |   checkFuncs(_,_,nil) = ()
+  |   checkFuncsAddFragments(_,_,nil,_, _) = ()
 
 
  (**************************************************************************
   *                   TRANSLATING DECLARATIONS                             *
   *                                                                        *
-  *  transdec : (E.env * E.tenv * A.dec) -> (E.env * E.tenv)               *
+  *  transdec : (E.env * E.tenv * A.dec * level * Temp.label) ->           *
+  *             (E.env * E.tenv * ir_code list)                            *
   **************************************************************************)
-  and transdec (env, tenv, A.VarDec{var,typ,init,pos}) =
+  and transdec (env, tenv, A.VarDec{var,typ,init,pos}, level, doneLabel) =
+    (* transdec returns an TransExp list of one element, corresponding to
+       Itree code. *)
     let
-      val initTy = transexp(env,tenv) init
+      val initTy = transexp(env,tenv,level, doneLabel) init
       val initTy' =
       (
         case typ of
@@ -760,40 +897,50 @@ struct
           | NONE => error pos transdec02
         )
       | NONE => case #ty(initTy) of T.NIL => (error pos transdec03) | _ => ();
-      (S.enter(env,#name(var),E.VARentry{access=(),ty=initTy'}), tenv)
+      (S.enter(env,#name(var),E.VARentry{access=Tr.allocInFrame(level),ty=initTy'}),
+       tenv, [Tr.vardec(#exp(initTy), level)])
     )
     end
-    | transdec (env, tenv, A.FunctionDec(declist)) =
+    | transdec (env, tenv, A.FunctionDec(declist), level, doneLabel) =
     let
                 (* gotta re-init loop depth counter *)
-      val env' = (pushBreakCnt(); addFuncNames(env,tenv,declist,nil))
+      val env' = (pushBreakCnt(); addFuncNames(env,tenv,declist,nil,level))
     in
-      checkFuncs(env',tenv,declist);
+      checkFuncsAddFragments(env',tenv,declist,level,doneLabel);
       popBreakCnt();    (* restore the loop depth counter *)
-      (env', tenv)
+      (env', tenv, [])
     end
 
-    | transdec (env, tenv, A.TypeDec(declist)) =
+    | transdec (env, tenv, A.TypeDec(declist), level, doneLabel) =
     let
       val tenv' = addTypeNames(env,tenv,declist,nil)
       val tenv'' = checkTypes(tenv',declist)
     in
       checkCycles(tenv'',declist);
-      (env, tenv'')
+      (env, tenv'', [])
     end
 
-
-  (*** transdecs : (E.env * E.tenv * A.dec list) -> (E.env * E.tenv) ***)
-  and transdecs (env,tenv,nil) = (env, tenv)
-    | transdecs (env,tenv,dec::decs) =
-  let val (env',tenv') = transdec (env,tenv,dec)
-   in transdecs (env',tenv',decs)
-  end
+  (*** transdecs : (E.env * E.tenv * A.dec list) ->
+                   (E.env * E.tenv * ir_code list)  ***)
+  and transdecs (env,tenv,nil,_, _) = (env, tenv, [])
+    | transdecs (env,tenv,dec::decs,level, doneLabel) =
+        let
+          val (env', tenv', transExp) = transdec (env,tenv,dec,level, doneLabel)
+          val (env'', tenv'', transExpList) = transdecs (env', tenv', decs, level, doneLabel)
+        in
+          (env'', tenv'', transExp@transExpList)
+        end
 
   (*** transprog : A.exp -> Frame.frag list ***)
-  fun transprog prog =
-     (transexp (E.base_env, E.base_tenv) prog;
-      Translate.getResult ())
-
+  fun transprog prog = (
+    let
+      val lev = Tr.newLevel({parent=Tr.outermost, numFormals=0})
+      val {exp=progexp, ty=progty} =
+        transexp (E.base_env, E.base_tenv, lev, Temp.newlabel()) prog;
+    in
+          Tr.addTigermainFrag (progexp, lev);
+          Tr.getResult ()
+    end
+  )
 end  (* structure Semant *)
 
