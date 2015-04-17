@@ -1,23 +1,42 @@
-Peter Dewire
+Peter Dewire (RA5)
 Assignment 6 Writeup
 
 <i> What I have done
-Finished makegraph.sml, except for MOVE instructions
-Working on liveness.sml
+Finished makegraph.sml, liveness.sml and register.sml
+Linked with CG1 and IG4
+Debugged and passing all tests, in addition to my own tests
 
 
 <ii> How other groups would use my code
+The best way to use my code is to call RegAlloc.regAlloc(<instrs>,
+<specialregs>, <availregs>) from main. Doing so will return a list of (assembly
+instruction, temporary) pairs and an allocation of temporaries to registers (in
+the form of a Register.register Temp.Table.table). You can then use these return
+values in your call to procEntryExit (I used CG1).
+
+For more specific information:
 Calling MakeGraph.instrs2graph(<instrs>), where <instrs> is a list of assembly
 instructions, will return a control flow graph corresponding to those
 instructions as well as a list of nodes in the graph.
+Calling Liveness.interferenceGraph(<flowgraph>), where <flowgraph> is a
+Flow.flowgraph (i.e. the one returned from instrs2graph), will return an
+interference graph and a function mapping nodes in the interference graph to
+temporaries.
+Calling RegAllocGen(Register).color(<igraph>, <alloc>, <registers>) on an
+interference graph, an initial allocation (i.e. the special register allocation)
+and a list of registers (i.e. the available registers), will return an
+allocation of the temporaries in the igraph to registers in <registers>.
 
 Calling MakeGraph.test() will print out the information associated with the
 graph and the nodes in it, based on the graph built for the program shown on
 Appel p. 212 and also described in RegAlloc/makegraph.sml
+Liveness.test() and RegAllocGen(Register).test() will likewise print out
+information associated with these programs based on the program in Appel, and
+the graphs constructed by MakeGraph and Liveness.
 
 
 <iii> What assumptions I have made
-No MOVE instructions
+None
 
 
 <iv> What desireable features I would like other groups to work on
@@ -27,4 +46,23 @@ Let me know if my <ii> is unclear.
 
 
 <v> Other files I have changed
-None
+I changed CG1's CodeGen/codegen.sml by removing "eax" from availregs_base in
+line 59
+
+
+
+Major Difficulties:
+The hardest part about RegAlloc was liveness (which was also the longest). The
+data structure was somewhat intricate and it was harder to implement the
+algorithm from Appel in functional form. liveness.sml was also the longest file.
+Overall, however, writing the code for RegAlloc was not the most challenging
+part. I was able to test while going along, things seemed to going smoothly, and
+I didn't run into any major bugs. Thus, for me, the hardest part of the
+assignment was linking. This is because it was here when I discovered that I had
+bugs in my program (the two modules I linked with had been tested and seemed
+correct). It was very difficult to debug though, because it involved looking at
+machine code, and trying to understand in depth the parts of the compiler that
+other groups had been working on. In the end, there were two main bugs that I
+spent most of my debugging time working out (both of which I had noted while
+writing my initial code, but proceeded to forget/ignore). Thus, it was somewhat
+frustrating in the end, but also very satisfying when queens ran correctly.
